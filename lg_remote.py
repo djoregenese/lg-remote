@@ -155,6 +155,12 @@ class WebSocketClient:
             offset = 10
         return data[offset : offset + payload_len].decode("utf-8", errors="replace")
 
+    def send_ping(self):
+        """Send a WebSocket ping frame. Raises on dead connection."""
+        if self.sock:
+            ping_frame = bytearray([0x89, 0x80]) + os.urandom(4)
+            self.sock.send(ping_frame)
+
     def close(self):
         if self.sock:
             try:
@@ -220,6 +226,12 @@ class WebSocketInputClient:
             bytearray(b ^ mask_key[i % 4] for i, b in enumerate(payload))
         )
         self.sock.send(frame)
+
+    def send_ping(self):
+        """Send a WebSocket ping frame. Raises on dead connection."""
+        if self.sock:
+            ping_frame = bytearray([0x89, 0x80]) + os.urandom(4)
+            self.sock.send(ping_frame)
 
     def close(self):
         if self.sock:

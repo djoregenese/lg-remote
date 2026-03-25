@@ -480,6 +480,7 @@ class AppDelegate(NSObject):
         self.panel = None
         self.remote_view = None
         self.reconnecting = False
+        self.keepalive_active = False
         return self
 
     def applicationDidFinishLaunching_(self, notification):
@@ -548,6 +549,7 @@ class AppDelegate(NSObject):
                 self.input_ws.connect()
                 self.performSelectorOnMainThread_withObject_waitUntilDone_(
                     "onConnected:", None, False)
+                self.start_keepalive()
                 return
             except Exception as e:
                 msg = str(e)
@@ -568,11 +570,35 @@ class AppDelegate(NSObject):
                     self.performSelectorOnMainThread_withObject_waitUntilDone_(
                         "onConnectionError:", f"{msg} — toggle off/on TV", False)
 
+    def start_keepalive(self):
+        """Start background keepalive pings every 15s on both sockets."""
+        self.keepalive_active = True
+        threading.Thread(target=self.keepalive_loop, daemon=True).start()
+
+    def keepalive_loop(self):
+        """Ping both sockets periodically. Triggers reconnect on failure."""
+        while self.keepalive_active:
+            time.sleep(15)
+            if not self.keepalive_active:
+                break
+            try:
+                if self.ws:
+                    self.ws.send_ping()
+                if self.input_ws:
+                    self.input_ws.send_ping()
+            except Exception:
+                self.keepalive_active = False
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "onConnectionError:", "Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
+                return
+
     def reconnect_tv(self):
         """Auto-reconnect after connection loss."""
         if self.reconnecting:
             return
         self.reconnecting = True
+        self.keepalive_active = False
         self.performSelectorOnMainThread_withObject_waitUntilDone_(
             "onConnectionError:", "Reconnecting...", False)
         if self.input_ws:
