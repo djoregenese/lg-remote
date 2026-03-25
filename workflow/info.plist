@@ -91,10 +91,7 @@ EOF</string>
 				<key>escaping</key>
 				<integer>0</integer>
 				<key>script</key>
-				<string>osascript -e 'tell application "Terminal"
-    activate
-    do script "python3 ~/Documents/projects/lg-remote/lg_remote.py"
-end tell'</string>
+				<string>python3 ~/Documents/projects/lg-remote/lg_remote_gui.py &amp;</string>
 				<key>scriptargtype</key>
 				<integer>1</integer>
 				<key>scriptfile</key>
