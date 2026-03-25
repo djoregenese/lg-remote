@@ -483,10 +483,10 @@ class AppDelegate(NSObject):
         return self
 
     def applicationDidFinishLaunching_(self, notification):
-        # Titled + Closable + NonactivatingPanel required for policy 2 visibility
+        # Titled + NonactivatingPanel required for policy 2 visibility
+        # (Borderless + policy 2 = invisible window)
         style = (
             AppKit.NSWindowStyleMaskTitled
-            | AppKit.NSWindowStyleMaskClosable
             | NSWindowStyleMaskNonactivatingPanel
         )
         self.panel = RemotePanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -498,6 +498,11 @@ class AppDelegate(NSObject):
         self.panel.setTitle_("")
         self.panel.setTitlebarAppearsTransparent_(True)
         self.panel.setTitleVisibility_(1)  # hidden
+        # Hide traffic-light buttons (they don't work in accessory mode anyway)
+        for btn_type in [AppKit.NSWindowCloseButton, AppKit.NSWindowMiniaturizeButton, AppKit.NSWindowZoomButton]:
+            btn = self.panel.standardWindowButton_(btn_type)
+            if btn:
+                btn.setHidden_(True)
         self.panel.setLevel_(NSFloatingWindowLevel)
         self.panel.setAlphaValue_(0.95)
         self.panel.setOpaque_(False)
