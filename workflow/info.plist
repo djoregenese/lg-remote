@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleid</key>
+	<string>com.djo.lg-remote</string>
+	<key>category</key>
+	<string>Tools</string>
+	<key>connections</key>
+	<dict>
+		<key>5A6B7C8D-1234-5678-9ABC-DEF012345678</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>6B7C8D9E-2345-6789-ABCD-EF0123456789</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitowards</key>
+				<string></string>
+			</dict>
+		</array>
+	</dict>
+	<key>createdby</key>
+	<string>djo</string>
+	<key>description</key>
+	<string>Control LG TV with keyboard</string>
+	<key>disabled</key>
+	<false/>
+	<key>name</key>
+	<string>LG TV Remote</string>
+	<key>objects</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>2</integer>
+				<key>escaping</key>
+				<integer>0</integer>
+				<key>keyword</key>
+				<string>lg</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyalinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string></string>
+				<key>script</key>
+				<string>cat &lt;&lt; 'EOF'
+{"items": [{"uid": "lg-remote", "title": "LG TV Remote", "subtitle": "Open keyboard remote for LG OLED65C5", "arg": "remote", "icon": {"path": "icon.png"}}]}
+EOF</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>subtext</key>
+				<string>Control your LG TV</string>
+				<key>title</key>
+				<string>LG TV Remote</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<false/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>5A6B7C8D-1234-5678-9ABC-DEF012345678</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>concurrently</key>
+				<false/>
+				<key>escaping</key>
+				<integer>0</integer>
+				<key>script</key>
+				<string>osascript -e 'tell application "Terminal"
+    activate
+    do script "python3 ~/Documents/projects/lg-remote/lg_remote.py"
+end tell'</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>6B7C8D9E-2345-6789-ABCD-EF0123456789</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+	</array>
+	<key>readme</key>
+	<string>Type "lg" in Alfred to open the LG TV remote.
+
+Arrow keys navigate, Enter selects, Backspace goes back,
+- / = for volume, Space for menu, h for home, Esc to quit.</string>
+	<key>uidata</key>
+	<dict>
+		<key>5A6B7C8D-1234-5678-9ABC-DEF012345678</key>
+		<dict>
+			<key>xpos</key>
+			<integer>150</integer>
+			<key>ypos</key>
+			<integer>50</integer>
+		</dict>
+		<key>6B7C8D9E-2345-6789-ABCD-EF0123456789</key>
+		<dict>
+			<key>xpos</key>
+			<integer>450</integer>
+			<key>ypos</key>
+			<integer>50</integer>
+		</dict>
+	</dict>
+	<key>version</key>
+	<string>1.0.0</string>
+	<key>webaddress</key>
+	<string>https://github.com/djoregenese/lg-remote</string>
+</dict>
+</plist>
