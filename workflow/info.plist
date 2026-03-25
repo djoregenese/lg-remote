@@ -91,7 +91,7 @@ EOF</string>
 				<key>escaping</key>
 				<integer>0</integer>
 				<key>script</key>
-				<string>python3 ~/Documents/projects/lg-remote/lg_remote_gui.py &amp;</string>
+				<string>/Users/dev/Documents/projects/lg-remote/toggle.sh</string>
 				<key>scriptargtype</key>
 				<integer>1</integer>
 				<key>scriptfile</key>

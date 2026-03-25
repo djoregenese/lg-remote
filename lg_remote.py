@@ -270,7 +270,13 @@ def authenticate(ws):
 
     # May get a pairingType response first, then the key
     for _ in range(5):
-        resp = json.loads(ws.recv())
+        raw = ws.recv()
+        if not raw:
+            continue  # skip empty frames
+        try:
+            resp = json.loads(raw)
+        except json.JSONDecodeError:
+            continue  # skip non-JSON frames
         ck = resp.get("payload", {}).get("client-key", "")
         if ck:
             if ck != CLIENT_KEY:
@@ -279,7 +285,11 @@ def authenticate(ws):
                 save_config(config)
                 print(f"{GREEN}Paired and saved!{RESET}")
             return ck
-    raise ConnectionError("Authentication failed")
+        # Check for error responses
+        err = resp.get("error")
+        if err:
+            raise ConnectionError(f"TV rejected: {err}")
+    raise ConnectionError("Authentication failed — no key received")
 
 
 def get_input_socket_url(ws):
@@ -293,7 +303,10 @@ def get_input_socket_url(ws):
             }
         )
     )
-    resp = json.loads(ws.recv())
+    raw = ws.recv()
+    if not raw:
+        raise ConnectionError("Empty response for input socket")
+    resp = json.loads(raw)
     url = resp.get("payload", {}).get("socketPath", "")
     if not url:
         raise ConnectionError("Failed to get input socket")

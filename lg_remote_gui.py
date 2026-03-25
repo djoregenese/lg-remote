@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""LG TV Remote — floating transparent GUI."""
+"""LG TV Remote — floating transparent GUI (pill-shaped modern design)."""
 
 import os
 import sys
 import json
+import math
 import threading
 import time
 
 import AppKit
 import objc
+
 from AppKit import (
     NSApplication,
     NSApp,
@@ -25,11 +27,11 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSEvent,
     NSKeyDownMask,
-    NSImage,
-    NSImageView,
     NSTimer,
+    NSWindowStyleMaskBorderless,
+    NSWindowStyleMaskNonactivatingPanel,
 )
-from Foundation import NSMakeRect, NSMakeSize, NSObject, NSDictionary
+from Foundation import NSMakeRect, NSMakePoint, NSMakeSize, NSObject, NSDictionary
 from AppKit import (
     NSForegroundColorAttributeName,
     NSFontAttributeName,
@@ -48,20 +50,16 @@ from lg_remote import (
     TV_PORT,
 )
 
-# Key code to TV button mapping
-# macOS virtual key codes
+# Key code to TV button mapping (macOS virtual key codes)
 KEYCODE_MAP = {
-    126: "UP",       # up arrow
-    125: "DOWN",     # down arrow
-    123: "LEFT",     # left arrow
-    124: "RIGHT",    # right arrow
-    36: "ENTER",     # return
-    51: "BACK",      # delete/backspace
-    49: "MENU",      # space
-    115: "HOME",     # home key
-    53: None,        # escape = quit
-    103: "VOLUMEUP",   # F11
-    111: "VOLUMEDOWN", # F12
+    126: "UP",
+    125: "DOWN",
+    123: "LEFT",
+    124: "RIGHT",
+    36: "ENTER",
+    51: "BACK",
+    49: "MENU",
+    53: None,          # escape = quit
     27: "VOLUMEDOWN",  # - key
     24: "VOLUMEUP",    # = key
     46: "MUTE",        # m
@@ -73,119 +71,360 @@ KEYCODE_MAP = {
     23: "5", 22: "6", 26: "7", 28: "8", 25: "9",
 }
 
-# Button display labels
-LABEL_MAP = {
-    "UP": "\u25B2", "DOWN": "\u25BC", "LEFT": "\u25C0", "RIGHT": "\u25B6",
-    "ENTER": "OK", "BACK": "\u232B", "MENU": "\u2630", "HOME": "\u2302",
-    "VOLUMEUP": "Vol+", "VOLUMEDOWN": "Vol-", "MUTE": "\U0001F507",
-    "INFO": "i", "POWER": "\u23FB",
-}
+WINDOW_WIDTH = 220
+WINDOW_HEIGHT = 420
 
-WINDOW_WIDTH = 280
-WINDOW_HEIGHT = 340
+# -- Color palette --
+COLOR_BODY_BG = (0.10, 0.10, 0.13, 0.95)
+COLOR_BODY_BORDER = (0.25, 0.25, 0.32, 0.5)
+COLOR_BTN_NORMAL = (0.18, 0.18, 0.24, 0.9)
+COLOR_BTN_HOVER = (0.30, 0.45, 0.85, 0.85)
+COLOR_BTN_BORDER = (0.30, 0.30, 0.38, 0.5)
+COLOR_TEXT = (0.82, 0.82, 0.88, 1.0)
+COLOR_TEXT_DIM = (0.45, 0.45, 0.55, 0.7)
+COLOR_ACCENT_BLUE = (0.35, 0.55, 0.95, 1.0)
+COLOR_ACCENT_RED = (0.85, 0.25, 0.25, 1.0)
+COLOR_POWER_BG = (0.35, 0.12, 0.12, 0.9)
+COLOR_CONNECTED = (0.35, 0.75, 0.45, 0.9)
+COLOR_DISCONNECTED = (0.85, 0.35, 0.35, 0.9)
+COLOR_DPAD_BG = (0.14, 0.14, 0.19, 0.9)
+COLOR_DPAD_SEGMENT = (0.20, 0.20, 0.28, 0.9)
+COLOR_DPAD_ACTIVE = (0.30, 0.50, 0.90, 0.85)
+COLOR_OK_BG = (0.25, 0.25, 0.35, 0.95)
+COLOR_VOL_BG = (0.16, 0.16, 0.22, 0.9)
+COLOR_VOL_DIVIDER = (0.30, 0.30, 0.38, 0.5)
+
+
+def make_color(r, g, b, a=1.0):
+    return NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, a)
+
+
+def make_color_t(tup):
+    return make_color(*tup)
+
+
+class RemotePanel(NSPanel):
+    """NSPanel subclass that terminates the app on close."""
+
+    def close(self):
+        NSApp.terminate_(None)
 
 
 class RemoteView(NSView):
-    """Custom view for the remote control UI."""
+    """Custom drawn view for the remote control UI."""
 
     def initWithFrame_(self, frame):
         self = objc.super(RemoteView, self).initWithFrame_(frame)
         if self is None:
             return None
-        self._status = "Connecting..."
-        self._last_button = ""
-        self._flash_timer = None
+        self.statusText = "Connecting..."
+        self.statusConnected = False
+        self.activeButton = ""
+        self.flashTimer = None
+        self.dragOrigin = None
         return self
 
+    def isFlipped(self):
+        return True
+
+    def isOpaque(self):
+        return False
+
+    def acceptsFirstResponder(self):
+        return True
+
+    # -- Drawing entry point --
+
     def drawRect_(self, rect):
-        # Background with rounded corners
+        self.draw_body()
+        self.draw_status_indicator()
+        self.draw_title()
+        self.draw_dpad()
+        self.draw_nav_buttons()
+        self.draw_volume_rocker()
+        self.draw_power_button()
+        self.draw_footer()
+        self.draw_flash_indicator()
+
+    # -- Body --
+
+    def draw_body(self):
         path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            self.bounds(), 16, 16
+            self.bounds(), 28, 28
         )
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08, 0.08, 0.12, 0.92).set()
+        make_color_t(COLOR_BODY_BG).set()
         path.fill()
-
-        # Border
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(0.3, 0.3, 0.4, 0.6).set()
-        path.setLineWidth_(1.5)
-        path.stroke()
-
-        # Title
-        self._draw_text("LG Remote", 0, 295, WINDOW_WIDTH, 30,
-                        size=18, bold=True,
-                        color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.9, 0.4, 0.4, 1.0))
-
-        # Status
-        if self._status:
-            sc = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.5, 0.8, 0.5, 0.8)
-            if "error" in self._status.lower() or "fail" in self._status.lower():
-                sc = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.9, 0.4, 0.4, 0.8)
-            self._draw_text(self._status, 0, 272, WINDOW_WIDTH, 20,
-                            size=11, color=sc)
-
-        # D-pad area
-        cx, cy = 90, 190
-        self._draw_button("\u25B2", cx, cy + 45, 40, 35, "UP")
-        self._draw_button("\u25BC", cx, cy - 45, 40, 35, "DOWN")
-        self._draw_button("\u25C0", cx - 50, cy, 40, 35, "LEFT")
-        self._draw_button("\u25B6", cx + 50, cy, 40, 35, "RIGHT")
-        self._draw_button("OK", cx, cy, 44, 44, "ENTER", circle=True)
-
-        # Right side controls
-        rx = 210
-        self._draw_button("\u232B", rx, cy + 45, 50, 30, "BACK")
-        self._draw_button("\u2630", rx, cy, 50, 30, "MENU")
-        self._draw_button("\u2302", rx, cy - 45, 50, 30, "HOME")
-
-        # Bottom row - volume
-        by = 90
-        self._draw_button("Vol-", 40, by, 55, 28, "VOLUMEDOWN")
-        self._draw_button("Mute", 115, by, 55, 28, "MUTE")
-        self._draw_button("Vol+", 190, by, 55, 28, "VOLUMEUP")
-
-        # Power
-        self._draw_button("\u23FB", 210, by - 40, 50, 28, "POWER")
-
-        # Help text
-        self._draw_text("Esc to close", 0, 15, WINDOW_WIDTH, 16,
-                        size=10, color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.4, 0.4, 0.5, 0.7))
-
-        # Last button flash
-        if self._last_button:
-            self._draw_text(">> " + self._last_button, 0, 38, WINDOW_WIDTH, 20,
-                            size=12, bold=True,
-                            color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.3, 0.8, 0.3, 0.9))
-
-    def _draw_button(self, label, x, y, w, h, btn_id, circle=False):
-        is_active = self._last_button == btn_id
-        if circle:
-            path = NSBezierPath.bezierPathWithOvalInRect_(
-                NSMakeRect(x - w/2, y - h/2, w, h))
-        else:
-            path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-                NSMakeRect(x - w/2, y - h/2, w, h), 6, 6)
-
-        if is_active:
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.3, 0.5, 0.9, 0.7).set()
-        else:
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.15, 0.15, 0.22, 0.8).set()
-        path.fill()
-
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(0.35, 0.35, 0.45, 0.6).set()
+        make_color_t(COLOR_BODY_BORDER).set()
         path.setLineWidth_(1.0)
         path.stroke()
 
-        tc = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.85, 0.85, 0.9, 1.0)
-        if is_active:
-            tc = NSColor.whiteColor()
-        self._draw_text(label, x - w/2, y - 8, w, 20, size=13, bold=is_active, color=tc)
+    # -- Status indicator (small dot + text) --
 
-    def _draw_text(self, text, x, y, w, h, size=14, bold=False, color=None):
+    def draw_status_indicator(self):
+        dot_x, dot_y = 16, 16
+        dot_r = 5
+        dot_rect = NSMakeRect(dot_x, dot_y, dot_r * 2, dot_r * 2)
+        dot_path = NSBezierPath.bezierPathWithOvalInRect_(dot_rect)
+        if self.statusConnected:
+            make_color_t(COLOR_CONNECTED).set()
+        else:
+            make_color_t(COLOR_DISCONNECTED).set()
+        dot_path.fill()
+
+        label = self.statusText if self.statusText else ""
+        color = make_color_t(COLOR_CONNECTED) if self.statusConnected else make_color_t(COLOR_DISCONNECTED)
+        self.draw_label(label, 30, 14, 170, 16, size=10, color=color, align=0)
+
+    # -- Title --
+
+    def draw_title(self):
+        self.draw_label("LG Remote", 0, 38, WINDOW_WIDTH, 24,
+                        size=16, bold=True, color=make_color_t(COLOR_TEXT))
+
+    # -- D-pad (circular with arc segments) --
+
+    def draw_dpad(self):
+        cx = WINDOW_WIDTH / 2
+        cy = 120
+        outer_r = 60
+        inner_r = 24
+
+        # Outer circle background
+        outer_rect = NSMakeRect(cx - outer_r, cy - outer_r, outer_r * 2, outer_r * 2)
+        outer_path = NSBezierPath.bezierPathWithOvalInRect_(outer_rect)
+        make_color_t(COLOR_DPAD_BG).set()
+        outer_path.fill()
+
+        # Draw four arc segments (UP, RIGHT, DOWN, LEFT)
+        directions = [
+            ("UP",    -135, -45),
+            ("RIGHT",  -45,  45),
+            ("DOWN",    45, 135),
+            ("LEFT",   135, 225),
+        ]
+
+        for btn_id, start_angle, end_angle in directions:
+            is_active = self.activeButton == btn_id
+            self.draw_arc_segment(cx, cy, inner_r + 4, outer_r - 3,
+                                  start_angle, end_angle, is_active)
+
+        # Draw directional arrows on each segment
+        arrow_dist = (inner_r + outer_r) / 2
+        arrows = [
+            ("UP",    cx,              cy - arrow_dist, "\u25B2"),
+            ("DOWN",  cx,              cy + arrow_dist, "\u25BC"),
+            ("LEFT",  cx - arrow_dist, cy,              "\u25C0"),
+            ("RIGHT", cx + arrow_dist, cy,              "\u25B6"),
+        ]
+        for btn_id, ax, ay, symbol in arrows:
+            is_active = self.activeButton == btn_id
+            tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_TEXT)
+            self.draw_label(symbol, ax - 10, ay - 8, 20, 16, size=12, color=tc)
+
+        # OK button in center
+        ok_active = self.activeButton == "ENTER"
+        ok_rect = NSMakeRect(cx - inner_r, cy - inner_r, inner_r * 2, inner_r * 2)
+        ok_path = NSBezierPath.bezierPathWithOvalInRect_(ok_rect)
+        if ok_active:
+            make_color_t(COLOR_DPAD_ACTIVE).set()
+        else:
+            make_color_t(COLOR_OK_BG).set()
+        ok_path.fill()
+        make_color_t(COLOR_BTN_BORDER).set()
+        ok_path.setLineWidth_(1.0)
+        ok_path.stroke()
+
+        tc = make_color(1, 1, 1, 1) if ok_active else make_color_t(COLOR_TEXT)
+        self.draw_label("OK", cx - 15, cy - 8, 30, 16, size=13, bold=True, color=tc)
+
+    def draw_arc_segment(self, cx, cy, r_inner, r_outer, start_deg, end_deg, active):
+        """Draw an arc segment between two radii. Angles in degrees, flipped-Y."""
+        path = NSBezierPath.alloc().init()
+
+        # In flipped coordinates, we negate angles to match expected visual direction
+        sa_rad = math.radians(-start_deg)
+        ea_rad = math.radians(-end_deg)
+
+        # Outer arc (counterclockwise in flipped = clockwise visually)
+        path.moveToPoint_(NSMakePoint(
+            cx + r_outer * math.cos(sa_rad),
+            cy - r_outer * math.sin(sa_rad)
+        ))
+        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
+            NSMakePoint(cx, cy), r_outer, -start_deg, -end_deg, True
+        )
+
+        # Line to inner arc
+        path.lineToPoint_(NSMakePoint(
+            cx + r_inner * math.cos(ea_rad),
+            cy - r_inner * math.sin(ea_rad)
+        ))
+
+        # Inner arc (clockwise in flipped = counterclockwise visually)
+        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
+            NSMakePoint(cx, cy), r_inner, -end_deg, -start_deg, False
+        )
+
+        path.closePath()
+
+        if active:
+            make_color_t(COLOR_DPAD_ACTIVE).set()
+        else:
+            make_color_t(COLOR_DPAD_SEGMENT).set()
+        path.fill()
+
+    # -- Navigation buttons (Menu, Back, Home, Info) --
+
+    def draw_nav_buttons(self):
+        y = 195
+        btn_w = 80
+        btn_h = 28
+        gap = 10
+        # Two columns, two rows
+        col1_x = WINDOW_WIDTH / 2 - btn_w - gap / 2
+        col2_x = WINDOW_WIDTH / 2 + gap / 2
+
+        buttons = [
+            ("Menu",  "MENU", col1_x, y),
+            ("Back",  "BACK", col2_x, y),
+            ("Home",  "HOME", col1_x, y + btn_h + 8),
+            ("Info",  "INFO", col2_x, y + btn_h + 8),
+        ]
+
+        for label, btn_id, bx, by in buttons:
+            self.draw_pill_button(label, btn_id, bx, by, btn_w, btn_h)
+
+    def draw_pill_button(self, label, btn_id, x, y, w, h):
+        is_active = self.activeButton == btn_id
+        radius = h / 2
+        btn_rect = NSMakeRect(x, y, w, h)
+        path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+            btn_rect, radius, radius)
+
+        if is_active:
+            make_color_t(COLOR_BTN_HOVER).set()
+        else:
+            make_color_t(COLOR_BTN_NORMAL).set()
+        path.fill()
+
+        make_color_t(COLOR_BTN_BORDER).set()
+        path.setLineWidth_(0.8)
+        path.stroke()
+
+        tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_TEXT)
+        self.draw_label(label, x, y + 5, w, h - 8, size=12, color=tc)
+
+    # -- Volume rocker (tall pill with +/- sections) --
+
+    def draw_volume_rocker(self):
+        vx = 30
+        vy = 275
+        vw = 50
+        vh = 70
+        radius = vw / 2
+
+        # Outer pill
+        vol_rect = NSMakeRect(vx, vy, vw, vh)
+        vol_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+            vol_rect, radius, radius)
+
+        make_color_t(COLOR_VOL_BG).set()
+        vol_path.fill()
+        make_color_t(COLOR_BTN_BORDER).set()
+        vol_path.setLineWidth_(0.8)
+        vol_path.stroke()
+
+        # Divider line
+        div_y = vy + vh / 2
+        div_path = NSBezierPath.bezierPath()
+        div_path.moveToPoint_(NSMakePoint(vx + 6, div_y))
+        div_path.lineToPoint_(NSMakePoint(vx + vw - 6, div_y))
+        make_color_t(COLOR_VOL_DIVIDER).set()
+        div_path.setLineWidth_(1.0)
+        div_path.stroke()
+
+        # + top half
+        vol_up_active = self.activeButton == "VOLUMEUP"
+        if vol_up_active:
+            clip_rect = NSMakeRect(vx, vy, vw, vh / 2)
+            clip_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+                vol_rect, radius, radius)
+            AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
+            NSBezierPath.clipRect_(clip_rect)
+            make_color_t(COLOR_BTN_HOVER).set()
+            clip_path.fill()
+            AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
+
+        tc_up = make_color(1, 1, 1, 1) if vol_up_active else make_color_t(COLOR_TEXT)
+        self.draw_label("+", vx, vy + 6, vw, 20, size=16, bold=True, color=tc_up)
+
+        # - bottom half
+        vol_down_active = self.activeButton == "VOLUMEDOWN"
+        if vol_down_active:
+            clip_rect = NSMakeRect(vx, vy + vh / 2, vw, vh / 2)
+            clip_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+                vol_rect, radius, radius)
+            AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
+            NSBezierPath.clipRect_(clip_rect)
+            make_color_t(COLOR_BTN_HOVER).set()
+            clip_path.fill()
+            AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
+
+        tc_dn = make_color(1, 1, 1, 1) if vol_down_active else make_color_t(COLOR_TEXT)
+        self.draw_label("\u2212", vx, vy + vh / 2 + 6, vw, 20, size=16, bold=True, color=tc_dn)
+
+        # Mute button below volume rocker
+        mute_y = vy + vh + 10
+        self.draw_pill_button("Mute", "MUTE", vx - 2, mute_y, vw + 4, 26)
+
+    # -- Power button --
+
+    def draw_power_button(self):
+        px = WINDOW_WIDTH - 78
+        py = 300
+        pw, ph = 50, 50
+
+        is_active = self.activeButton == "POWER"
+        power_rect = NSMakeRect(px, py, pw, ph)
+        power_path = NSBezierPath.bezierPathWithOvalInRect_(power_rect)
+
+        if is_active:
+            make_color(0.95, 0.2, 0.2, 0.9).set()
+        else:
+            make_color_t(COLOR_POWER_BG).set()
+        power_path.fill()
+
+        make_color(0.6, 0.2, 0.2, 0.6).set()
+        power_path.setLineWidth_(1.5)
+        power_path.stroke()
+
+        tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_ACCENT_RED)
+        self.draw_label("\u23FB", px, py + 14, pw, 22, size=18, bold=True, color=tc)
+
+    # -- Footer --
+
+    def draw_footer(self):
+        self.draw_label("Q or Esc to close",
+                        0, WINDOW_HEIGHT - 28, WINDOW_WIDTH, 16,
+                        size=9, color=make_color_t(COLOR_TEXT_DIM))
+
+    # -- Flash indicator --
+
+    def draw_flash_indicator(self):
+        if self.activeButton:
+            label = self.activeButton
+            self.draw_label(label, 0, WINDOW_HEIGHT - 48, WINDOW_WIDTH, 18,
+                            size=11, bold=True, color=make_color_t(COLOR_ACCENT_BLUE))
+
+    # -- Text drawing helper (safe name: no underscore prefix) --
+
+    def draw_label(self, text, x, y, w, h, size=14, bold=False, color=None, align=1):
+        """Draw text. align: 0=left, 1=center, 2=right."""
         if color is None:
-            color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.8, 0.8, 0.85, 1.0)
+            color = make_color_t(COLOR_TEXT)
         font = NSFont.boldSystemFontOfSize_(size) if bold else NSFont.systemFontOfSize_(size)
         style = NSMutableParagraphStyle.alloc().init()
-        style.setAlignment_(1)  # center
+        style.setAlignment_(align)
         attrs = {
             NSForegroundColorAttributeName: color,
             NSFontAttributeName: font,
@@ -194,21 +433,43 @@ class RemoteView(NSView):
         astr = NSAttributedString.alloc().initWithString_attributes_(text, attrs)
         astr.drawInRect_(NSMakeRect(x, y, w, h))
 
+    # -- Button flash animation --
+
     def flash_button(self, btn_name):
-        self._last_button = btn_name
+        self.activeButton = btn_name
         self.setNeedsDisplay_(True)
-        if self._flash_timer:
-            self._flash_timer.invalidate()
-        self._flash_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            0.3, self, "clearFlash:", None, False)
+        if self.flashTimer:
+            self.flashTimer.invalidate()
+        self.flashTimer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            0.25, self, "clearFlash:", None, False)
 
     def clearFlash_(self, timer):
-        self._last_button = ""
+        self.activeButton = ""
         self.setNeedsDisplay_(True)
 
-    def set_status(self, text):
-        self._status = text
+    def update_status(self, text, connected=False):
+        self.statusText = text
+        self.statusConnected = connected
         self.setNeedsDisplay_(True)
+
+    # -- Dragging support --
+
+    def mouseDown_(self, event):
+        # Activate the app so local key monitor works
+        NSApp.activateIgnoringOtherApps_(True)
+        self.window().makeKeyWindow()
+        self.dragOrigin = event.locationInWindow()
+
+    def mouseDragged_(self, event):
+        if self.dragOrigin is None:
+            return
+        window = self.window()
+        screen_loc = event.locationInWindow()
+        current_frame = window.frame()
+        dx = screen_loc.x - self.dragOrigin.x
+        dy = screen_loc.y - self.dragOrigin.y
+        new_origin = (current_frame.origin.x + dx, current_frame.origin.y + dy)
+        window.setFrameOrigin_(new_origin)
 
 
 class AppDelegate(NSObject):
@@ -218,16 +479,17 @@ class AppDelegate(NSObject):
         self.input_ws = None
         self.panel = None
         self.remote_view = None
+        self.reconnecting = False
         return self
 
     def applicationDidFinishLaunching_(self, notification):
-        # Create floating panel
+        # Titled + Closable + NonactivatingPanel required for policy 2 visibility
         style = (
             AppKit.NSWindowStyleMaskTitled
             | AppKit.NSWindowStyleMaskClosable
-            | AppKit.NSWindowStyleMaskNonactivatingPanel
+            | NSWindowStyleMaskNonactivatingPanel
         )
-        self.panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+        self.panel = RemotePanel.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
             style,
             NSBackingStoreBuffered,
@@ -237,59 +499,102 @@ class AppDelegate(NSObject):
         self.panel.setTitlebarAppearsTransparent_(True)
         self.panel.setTitleVisibility_(1)  # hidden
         self.panel.setLevel_(NSFloatingWindowLevel)
-        self.panel.setAlphaValue_(0.92)
+        self.panel.setAlphaValue_(0.95)
         self.panel.setOpaque_(False)
         self.panel.setBackgroundColor_(NSColor.clearColor())
-        self.panel.setMovableByWindowBackground_(True)
         self.panel.setHasShadow_(True)
+        self.panel.setMovableByWindowBackground_(True)
 
-        # Position in top-right corner
+        # Position top-right
         screen = AppKit.NSScreen.mainScreen().frame()
-        x = screen.size.width - WINDOW_WIDTH - 30
+        x = screen.size.width - WINDOW_WIDTH - 40
         y = screen.size.height - WINDOW_HEIGHT - 80
         self.panel.setFrameOrigin_((x, y))
 
-        # Custom view
+        # Content view
         self.remote_view = RemoteView.alloc().initWithFrame_(
             NSMakeRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
         )
         self.panel.setContentView_(self.remote_view)
+        self.panel.setDelegate_(self)
         self.panel.makeKeyAndOrderFront_(None)
 
-        # Key event monitor
+        # Local key monitor ONLY — keys only captured when remote is focused
         NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
-            NSKeyDownMask, self.handleKeyEvent_
+            NSKeyDownMask, self.handle_key_event
         )
 
         # Connect in background
         threading.Thread(target=self.connect_tv, daemon=True).start()
 
     def connect_tv(self):
-        try:
-            self.ws = WebSocketClient(TV_HOST, TV_PORT)
-            self.ws.connect()
-            authenticate(self.ws)
-            url = get_input_socket_url(self.ws)
-            self.input_ws = WebSocketInputClient(url)
-            self.input_ws.connect()
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "setConnected:", None, False)
-        except Exception as e:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "setError:", str(e), False)
+        """Connect to TV (runs in background thread). Auto-retries on failure."""
+        # Exponential backoff: 10s, 30s, 60s — TV rate-limits per-IP
+        delays = [10, 30, 60]
+        for attempt in range(len(delays) + 1):
+            try:
+                if self.ws:
+                    self.ws.close()
+                self.ws = WebSocketClient(TV_HOST, TV_PORT)
+                self.ws.connect()
+                authenticate(self.ws)
+                url = get_input_socket_url(self.ws)
+                self.input_ws = WebSocketInputClient(url)
+                self.input_ws.connect()
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "onConnected:", None, False)
+                return
+            except Exception as e:
+                msg = str(e)
+                # Friendly messages for common errors
+                if "Expecting value" in msg or "JSONDecode" in msg:
+                    msg = "TV sent empty response"
+                elif "no key received" in msg:
+                    msg = "Auth failed"
+                elif "Try Again" in msg.lower():
+                    msg = "TV rate-limited"
 
-    def setConnected_(self, _):
-        self.remote_view.set_status("Connected")
+                if attempt < len(delays):
+                    wait = delays[attempt]
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "onConnectionError:", f"{msg} — retry in {wait}s", False)
+                    time.sleep(wait)
+                else:
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "onConnectionError:", f"{msg} — toggle off/on TV", False)
 
-    def setError_(self, err):
-        self.remote_view.set_status(f"Error: {err}")
+    def reconnect_tv(self):
+        """Auto-reconnect after connection loss."""
+        if self.reconnecting:
+            return
+        self.reconnecting = True
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "onConnectionError:", "Reconnecting...", False)
+        if self.input_ws:
+            self.input_ws.close()
+            self.input_ws = None
+        if self.ws:
+            self.ws.close()
+            self.ws = None
+        time.sleep(3)
+        self.reconnecting = False
+        self.connect_tv()
 
-    def handleKeyEvent_(self, event):
+    def onConnected_(self, _):
+        self.remote_view.update_status("Connected", True)
+
+    def onConnectionError_(self, err):
+        msg = str(err) if err else "Unknown error"
+        if len(msg) > 35:
+            msg = msg[:32] + "..."
+        self.remote_view.update_status(msg, False)
+
+    def handle_key_event(self, event):
+        """Local monitor — only fires when remote window is focused."""
         kc = event.keyCode()
 
-        # Escape = quit
-        if kc == 53:
-            NSApp.terminate_(None)
+        if kc == 53 or kc == 12:  # Escape or Q = quit
+            os._exit(0)
             return None
 
         btn = KEYCODE_MAP.get(kc)
@@ -298,11 +603,18 @@ class AppDelegate(NSObject):
                 self.input_ws.send_button(btn)
                 self.remote_view.flash_button(btn)
             except Exception:
-                self.remote_view.set_status("Connection lost")
-                threading.Thread(target=self.connect_tv, daemon=True).start()
+                self.remote_view.update_status("Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
             return None
 
         return event
+
+    # Window close button (red X) should quit the app
+    def windowWillClose_(self, notification):
+        NSApp.terminate_(None)
+
+    def applicationShouldTerminateAfterLastWindowClosed_(self, app):
+        return True
 
     def applicationWillTerminate_(self, notification):
         if self.input_ws:
@@ -313,7 +625,8 @@ class AppDelegate(NSObject):
 
 def main():
     app = NSApplication.sharedApplication()
-    app.setActivationPolicy_(0)  # regular app (shows in dock briefly)
+    # Titled + NonactivatingPanel + policy 2 = visible window, no dock icon
+    app.setActivationPolicy_(2)
 
     delegate = AppDelegate.alloc().init()
     app.setDelegate_(delegate)
