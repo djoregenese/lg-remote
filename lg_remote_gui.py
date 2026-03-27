@@ -154,26 +154,12 @@ class RemoteView(NSView):
         self.activeButton = ""
         self.flashTimer = None
         self.dragOrigin = None
-        self.trackpadActive = False  # True while dragging inside trackpad zone
-        self.trackpadHover = False   # True while cursor is inside trackpad zone
-        self.onPointerMove = None    # callback(dx, dy)
-        self.onPointerClick = None   # callback()
-        self.onPointerScroll = None  # callback(dx, dy)
-        # Set up tracking area for mouse moved events in trackpad zone
-        self._setupTrackingArea()
+        self.trackpadSelected = False  # Modal: True when trackpad mode is active
+        self.onPointerMove = None      # callback(dx, dy)
+        self.onPointerClick = None     # callback()
+        self.onPointerScroll = None    # callback(dx, dy)
+        self.onTrackpadToggle = None   # callback(bool) — notify delegate of mode change
         return self
-
-    def _setupTrackingArea(self):
-        trackpad_rect = NSMakeRect(TRACKPAD_X, TRACKPAD_Y, TRACKPAD_W, TRACKPAD_H)
-        opts = (
-            AppKit.NSTrackingMouseEnteredAndExited
-            | AppKit.NSTrackingMouseMoved
-            | AppKit.NSTrackingActiveInKeyWindow
-        )
-        area = AppKit.NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
-            trackpad_rect, opts, self, None
-        )
-        self.addTrackingArea_(area)
 
     def isFlipped(self):
         return True
@@ -459,32 +445,48 @@ class RemoteView(NSView):
         rect = NSMakeRect(TRACKPAD_X, TRACKPAD_Y, TRACKPAD_W, TRACKPAD_H)
         path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(rect, 12, 12)
 
-        if self.trackpadActive:
+        if self.trackpadSelected:
             make_color_t(COLOR_TRACKPAD_ACTIVE).set()
         else:
             make_color_t(COLOR_TRACKPAD_BG).set()
         path.fill()
 
-        make_color_t(COLOR_TRACKPAD_BORDER).set()
-        path.setLineWidth_(1.0)
+        # Highlighted border when selected
+        if self.trackpadSelected:
+            make_color_t(COLOR_ACCENT_BLUE).set()
+            path.setLineWidth_(2.0)
+        else:
+            make_color_t(COLOR_TRACKPAD_BORDER).set()
+            path.setLineWidth_(1.0)
         path.stroke()
 
-        # Label
-        label_color = make_color_t(COLOR_TEXT_DIM)
-        if self.trackpadActive:
-            label_color = make_color_t(COLOR_ACCENT_BLUE)
-        self.draw_label("Trackpad", TRACKPAD_X, TRACKPAD_Y + 4, TRACKPAD_W, 14,
-                        size=9, color=label_color)
-        # Cursor icon hint
-        self.draw_label("⇢", TRACKPAD_X, TRACKPAD_Y + TRACKPAD_H / 2 - 10,
-                        TRACKPAD_W, 20, size=16, color=make_color_t(COLOR_TEXT_DIM))
+        if self.trackpadSelected:
+            self.draw_label("Pointer Active", TRACKPAD_X, TRACKPAD_Y + 4, TRACKPAD_W, 14,
+                            size=9, bold=True, color=make_color_t(COLOR_ACCENT_BLUE))
+            self.draw_label("ESC to exit", TRACKPAD_X, TRACKPAD_Y + TRACKPAD_H - 18,
+                            TRACKPAD_W, 14, size=8, color=make_color_t(COLOR_TEXT_DIM))
+            # Pointer icon
+            self.draw_label("\u25C7", TRACKPAD_X, TRACKPAD_Y + TRACKPAD_H / 2 - 12,
+                            TRACKPAD_W, 20, size=18, color=make_color_t(COLOR_ACCENT_BLUE))
+        else:
+            self.draw_label("Trackpad", TRACKPAD_X, TRACKPAD_Y + 4, TRACKPAD_W, 14,
+                            size=9, color=make_color_t(COLOR_TEXT_DIM))
+            self.draw_label("\u25C7", TRACKPAD_X, TRACKPAD_Y + TRACKPAD_H / 2 - 12,
+                            TRACKPAD_W, 20, size=18, color=make_color_t(COLOR_TEXT_DIM))
+            self.draw_label("Click to select", TRACKPAD_X, TRACKPAD_Y + TRACKPAD_H - 18,
+                            TRACKPAD_W, 14, size=8, color=make_color_t(COLOR_TEXT_DIM))
 
     # -- Footer --
 
     def draw_footer(self):
-        self.draw_label("Q/Esc close · Click trackpad to select",
-                        0, WINDOW_HEIGHT - 28, WINDOW_WIDTH, 16,
-                        size=8, color=make_color_t(COLOR_TEXT_DIM))
+        if self.trackpadSelected:
+            self.draw_label("Move to aim · Click to select · Esc exits",
+                            0, WINDOW_HEIGHT - 28, WINDOW_WIDTH, 16,
+                            size=8, color=make_color_t(COLOR_ACCENT_BLUE))
+        else:
+            self.draw_label("Q/Esc close · Click trackpad for pointer",
+                            0, WINDOW_HEIGHT - 28, WINDOW_WIDTH, 16,
+                            size=8, color=make_color_t(COLOR_TEXT_DIM))
 
     # -- Flash indicator --
 
@@ -538,29 +540,44 @@ class RemoteView(NSView):
         return (TRACKPAD_X <= loc.x <= TRACKPAD_X + TRACKPAD_W and
                 TRACKPAD_Y <= loc.y <= TRACKPAD_Y + TRACKPAD_H)
 
+    def enterTrackpadMode(self):
+        """Enter modal trackpad pointer mode."""
+        self.trackpadSelected = True
+        if self.onTrackpadToggle:
+            self.onTrackpadToggle(True)
+        self.setNeedsDisplay_(True)
+
+    def exitTrackpadMode(self):
+        """Exit modal trackpad pointer mode."""
+        self.trackpadSelected = False
+        if self.onTrackpadToggle:
+            self.onTrackpadToggle(False)
+        self.setNeedsDisplay_(True)
+
     def mouseDown_(self, event):
         # Activate the app so local key monitor works
         NSApp.activateIgnoringOtherApps_(True)
         self.window().makeKeyWindow()
 
+        if self.trackpadSelected:
+            # While in trackpad mode, click = TV click
+            if self.onPointerClick:
+                self.onPointerClick()
+            return
+
         if self._point_in_trackpad(event):
-            # Start trackpad pointer mode
-            self.trackpadActive = True
-            self.trackpadDragged = False
-            self.dragOrigin = None
-            self.setNeedsDisplay_(True)
+            # Click on trackpad zone → enter pointer mode
+            self.enterTrackpadMode()
         else:
             # Window drag mode
-            self.trackpadActive = False
             self.dragOrigin = event.locationInWindow()
 
     def mouseDragged_(self, event):
-        if self.trackpadActive:
-            # Send pointer move with raw deltas — apply sensitivity curve
+        if self.trackpadSelected:
+            # In trackpad mode, drags also move the pointer
             dx, dy = apply_sensitivity(event.deltaX(), event.deltaY())
             if self.onPointerMove and (dx or dy):
                 self.onPointerMove(dx, dy)
-                self.trackpadDragged = True
             return
 
         # Window drag
@@ -575,30 +592,8 @@ class RemoteView(NSView):
         window.setFrameOrigin_(new_origin)
 
     def mouseUp_(self, event):
-        if self.trackpadActive:
-            # Only click if we didn't drag (tap = click, drag = move)
-            if not self.trackpadDragged and self.onPointerClick:
-                self.onPointerClick()
-            self.trackpadActive = False
-            self.trackpadDragged = False
-            self.setNeedsDisplay_(True)
-            return
-        self.dragOrigin = None
-
-    def mouseEntered_(self, event):
-        self.trackpadHover = True
-        self.setNeedsDisplay_(True)
-
-    def mouseExited_(self, event):
-        self.trackpadHover = False
-        self.setNeedsDisplay_(True)
-
-    def scrollWheel_(self, event):
-        if self._point_in_trackpad(event) and self.onPointerScroll:
-            dx = int(event.scrollingDeltaX())
-            dy = int(event.scrollingDeltaY())
-            if dx or dy:
-                self.onPointerScroll(dx, dy)
+        if not self.trackpadSelected:
+            self.dragOrigin = None
 
 
 class AppDelegate(NSObject):
@@ -610,6 +605,7 @@ class AppDelegate(NSObject):
         self.remote_view = None
         self.reconnecting = False
         self.keepalive_active = False
+        self._moveMonitor = None
         return self
 
     def applicationDidFinishLaunching_(self, notification):
@@ -653,6 +649,9 @@ class AppDelegate(NSObject):
         self.panel.setContentView_(self.remote_view)
         self.panel.setDelegate_(self)
         self.panel.makeKeyAndOrderFront_(None)
+
+        # Wire trackpad mode toggle
+        self.remote_view.onTrackpadToggle = self.handle_trackpad_toggle
 
         # Local key monitor ONLY — keys only captured when remote is focused
         NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
@@ -764,6 +763,32 @@ class AppDelegate(NSObject):
                 self.remote_view.update_status("Connection lost", False)
                 threading.Thread(target=self.reconnect_tv, daemon=True).start()
 
+    def handle_trackpad_toggle(self, entering):
+        """Called when trackpad mode is entered/exited."""
+        if entering:
+            # Start monitoring mouse-moved + scroll events
+            def handler(event):
+                if event.type() == AppKit.NSScrollWheel:
+                    dx = int(event.scrollingDeltaX())
+                    dy = int(event.scrollingDeltaY())
+                    if dx or dy:
+                        self.send_pointer_scroll(dx, dy)
+                    return event
+                # Mouse moved
+                dx, dy = apply_sensitivity(event.deltaX(), event.deltaY())
+                if dx or dy:
+                    self.send_pointer_move(dx, dy)
+                return event
+
+            self._moveMonitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+                AppKit.NSMouseMovedMask | AppKit.NSScrollWheelMask,
+                handler
+            )
+        else:
+            if self._moveMonitor:
+                NSEvent.removeMonitor_(self._moveMonitor)
+                self._moveMonitor = None
+
     def send_pointer_scroll(self, dx, dy):
         if self.input_ws:
             try:
@@ -782,9 +807,22 @@ class AppDelegate(NSObject):
         """Local monitor — only fires when remote window is focused."""
         kc = event.keyCode()
 
-        if kc == 53 or kc == 12:  # Escape or Q = quit
+        if kc == 53:  # Escape
+            if self.remote_view.trackpadSelected:
+                # Exit trackpad mode, don't quit
+                self.remote_view.exitTrackpadMode()
+                return None
+            else:
+                os._exit(0)
+                return None
+
+        if kc == 12:  # Q = always quit
             os._exit(0)
             return None
+
+        # In trackpad mode, don't process button keys (except ESC/Q above)
+        if self.remote_view.trackpadSelected:
+            return event
 
         btn = KEYCODE_MAP.get(kc)
         if btn and self.input_ws:
