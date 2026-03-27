@@ -38,7 +38,10 @@ def connect_tv():
                     tv_ws.close()
                 tv_ws = WebSocketClient(TV_HOST, TV_PORT)
                 tv_ws.connect()
+                # Give user 60s to accept the pairing prompt on the TV
+                tv_ws.sock.settimeout(60)
                 authenticate(tv_ws)
+                tv_ws.sock.settimeout(10)
                 url = get_input_socket_url(tv_ws)
                 tv_input = WebSocketInputClient(url)
                 tv_input.connect()
@@ -141,14 +144,16 @@ body {
 /* Remote container */
 .remote {
   display: flex; flex-direction: column; align-items: center;
-  gap: 20px; width: 100%; max-width: 320px;
+  justify-content: space-evenly;
+  gap: 0; width: 100%; max-width: 400px;
   flex: 1;
+  padding: 0 8px;
 }
 
 /* D-Pad */
 .dpad {
   position: relative;
-  width: 220px; height: 220px;
+  width: min(72vw, 280px); height: min(72vw, 280px);
 }
 .dpad-ring {
   position: absolute; inset: 0;
@@ -159,50 +164,43 @@ body {
 .dpad-btn {
   position: absolute;
   display: flex; align-items: center; justify-content: center;
-  color: #c0c0c8; font-size: 22px;
+  color: #c0c0c8; font-size: 26px;
   cursor: pointer;
   z-index: 2;
-  transition: color 0.1s;
+  border-radius: 12px;
+  transition: background 0.1s, color 0.1s;
 }
-.dpad-btn:active { color: #fff; }
-.dpad-up    { top: 8px;   left: 50%; transform: translateX(-50%); width: 70px; height: 60px; }
-.dpad-down  { bottom: 8px; left: 50%; transform: translateX(-50%); width: 70px; height: 60px; }
-.dpad-left  { left: 8px;  top: 50%; transform: translateY(-50%); width: 60px; height: 70px; }
-.dpad-right { right: 8px; top: 50%; transform: translateY(-50%); width: 60px; height: 70px; }
+.dpad-btn:active { color: #fff; background: rgba(60, 100, 200, 0.25); }
+.dpad-up    { top: 6px;    left: 50%; transform: translateX(-50%); width: 80px; height: 72px; }
+.dpad-down  { bottom: 6px; left: 50%; transform: translateX(-50%); width: 80px; height: 72px; }
+.dpad-left  { left: 6px;   top: 50%; transform: translateY(-50%); width: 72px; height: 80px; }
+.dpad-right { right: 6px;  top: 50%; transform: translateY(-50%); width: 72px; height: 80px; }
 .dpad-ok {
   position: absolute;
   top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: 72px; height: 72px; border-radius: 50%;
+  width: 80px; height: 80px; border-radius: 50%;
   background: #222233;
   border: 1px solid #333345;
   display: flex; align-items: center; justify-content: center;
-  font-size: 15px; font-weight: 600; color: #d0d0d8;
+  font-size: 17px; font-weight: 600; color: #d0d0d8;
   cursor: pointer; z-index: 3;
   transition: background 0.1s;
 }
 .dpad-ok:active { background: #3355aa; color: #fff; }
 
-/* Touch highlight for d-pad arrows */
-.dpad-btn:active::after {
-  content: '';
-  position: absolute; inset: 0;
-  border-radius: 50%;
-  background: rgba(60, 100, 200, 0.25);
-}
-
 /* Nav row */
 .nav-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  width: 100%; max-width: 260px;
+  gap: 12px;
+  width: 100%; max-width: 340px;
 }
 .nav-btn {
-  height: 44px; border-radius: 22px;
+  height: 50px; border-radius: 25px;
   background: #1e1e28;
   border: 1px solid #2a2a35;
   color: #c0c0c8;
-  font-size: 14px; font-weight: 500;
+  font-size: 16px; font-weight: 500;
   cursor: pointer;
   transition: background 0.1s;
   display: flex; align-items: center; justify-content: center;
@@ -212,36 +210,36 @@ body {
 /* Bottom controls */
 .bottom-row {
   display: flex; align-items: center; justify-content: space-between;
-  width: 100%; max-width: 280px;
-  gap: 16px;
+  width: 100%; max-width: 340px;
+  gap: 20px;
 }
 
 /* Volume rocker */
 .vol-rocker {
   display: flex; flex-direction: column;
-  border-radius: 28px;
+  border-radius: 32px;
   background: #1a1a22;
   border: 1px solid #2a2a35;
   overflow: hidden;
-  width: 60px;
+  width: 68px;
 }
 .vol-btn {
-  height: 52px;
+  height: 58px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 22px; font-weight: 600; color: #c0c0c8;
+  font-size: 24px; font-weight: 600; color: #c0c0c8;
   cursor: pointer;
   transition: background 0.1s;
 }
 .vol-btn:active { background: #3355aa; color: #fff; }
 .vol-divider {
-  height: 1px; background: #2a2a35; margin: 0 8px;
+  height: 1px; background: #2a2a35; margin: 0 10px;
 }
 
 /* Mute */
 .mute-btn {
-  width: 60px; height: 36px; border-radius: 18px;
+  width: 68px; height: 40px; border-radius: 20px;
   background: #1e1e28; border: 1px solid #2a2a35;
-  color: #c0c0c8; font-size: 12px; font-weight: 500;
+  color: #c0c0c8; font-size: 13px; font-weight: 500;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: background 0.1s;
 }
@@ -249,11 +247,11 @@ body {
 
 /* Power */
 .power-btn {
-  width: 56px; height: 56px; border-radius: 50%;
+  width: 64px; height: 64px; border-radius: 50%;
   background: #3a1515;
   border: 2px solid #5a2020;
   color: #e04040;
-  font-size: 24px;
+  font-size: 28px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.1s;
@@ -263,16 +261,16 @@ body {
 /* Channel rocker */
 .ch-rocker {
   display: flex; flex-direction: column;
-  border-radius: 28px;
+  border-radius: 32px;
   background: #1a1a22;
   border: 1px solid #2a2a35;
   overflow: hidden;
-  width: 60px;
+  width: 68px;
 }
 .ch-btn {
-  height: 52px;
+  height: 58px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 600; color: #c0c0c8;
+  font-size: 14px; font-weight: 600; color: #c0c0c8;
   cursor: pointer;
   transition: background 0.1s;
 }
@@ -280,10 +278,10 @@ body {
 
 /* Feedback toast */
 .toast {
-  position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: calc(40px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
   background: rgba(50, 80, 180, 0.85);
-  color: #fff; font-size: 13px; font-weight: 600;
-  padding: 6px 18px; border-radius: 20px;
+  color: #fff; font-size: 14px; font-weight: 600;
+  padding: 8px 20px; border-radius: 20px;
   opacity: 0; transition: opacity 0.15s;
   pointer-events: none;
 }
@@ -292,10 +290,10 @@ body {
 /* Haptic feedback visual */
 @keyframes press {
   0% { transform: scale(1); }
-  50% { transform: scale(0.92); }
+  50% { transform: scale(0.93); }
   100% { transform: scale(1); }
 }
-.pressing { animation: press 0.15s ease; }
+.pressing { animation: press 0.12s ease; }
 </style>
 </head>
 <body>
