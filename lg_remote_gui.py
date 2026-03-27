@@ -417,14 +417,22 @@ class RemoteView(NSView):
             is_active = self.activeButton == f"APP:{app_id}"
             rect = NSMakeRect(x, y, s, s)
 
-            # Draw the icon image (rounded via clipping)
+            # Draw the icon image (rounded via clipping, with padding)
             icon_img = APP_ICONS.get(icon_key)
             if icon_img:
+                pad = 4
+                icon_rect = NSMakeRect(x + pad, y + pad, s - 2 * pad, s - 2 * pad)
                 AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
-                clip_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(rect, 10, 10)
+                clip_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(icon_rect, 8, 8)
                 clip_path.addClip()
+                # Flip vertically to correct upside-down rendering
+                xform = AppKit.NSAffineTransform.transform()
+                xform.translateXBy_yBy_(0, y + pad + (s - 2 * pad))
+                xform.scaleXBy_yBy_(1.0, -1.0)
+                xform.translateXBy_yBy_(0, -(y + pad))
+                xform.concat()
                 icon_img.drawInRect_fromRect_operation_fraction_(
-                    rect, ((0, 0), icon_img.size()), AppKit.NSCompositeSourceOver, 1.0)
+                    icon_rect, ((0, 0), icon_img.size()), AppKit.NSCompositeSourceOver, 1.0)
                 AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
 
             # Active overlay
