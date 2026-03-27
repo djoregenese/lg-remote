@@ -291,13 +291,9 @@ body {
 }
 .toast.show { opacity: 1; }
 
-/* Haptic feedback visual */
-@keyframes press {
-  0% { transform: scale(1); }
-  50% { transform: scale(0.93); }
-  100% { transform: scale(1); }
-}
-.pressing { animation: press 0.12s ease; }
+/* Haptic feedback — opacity flash avoids clobbering translate transforms on d-pad */
+[data-btn] { transition: opacity 0.1s, background 0.1s, color 0.1s; }
+[data-btn].pressing { opacity: 0.5; }
 </style>
 </head>
 <body>
