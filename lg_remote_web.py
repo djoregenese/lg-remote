@@ -112,8 +112,8 @@ HTML_PAGE = """<!DOCTYPE html>
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
   height: 100%; width: 100%;
-  background: #0d0d11;
-  color: #d0d0d8;
+  background: #0d0d14;
+  color: #8888cc;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif;
   overflow: hidden;
   touch-action: manipulation;
@@ -128,15 +128,16 @@ body {
 .status {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 0 4px;
-  font-size: 13px; color: #888;
+  font-size: 13px; color: #6666aa;
 }
 .status .dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #d44; transition: background 0.3s;
+  background: #ff3355; transition: background 0.3s;
+  box-shadow: 0 0 6px #ff3355;
 }
-.status.connected .dot { background: #4c4; }
+.status.connected .dot { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
 .title {
-  font-size: 20px; font-weight: 700; color: #e0e0e8;
+  font-size: 20px; font-weight: 700; color: #e0e4ff;
   padding: 4px 0 16px;
   letter-spacing: -0.5px;
 }
@@ -158,19 +159,20 @@ body {
 .dpad-ring {
   position: absolute; inset: 0;
   border-radius: 50%;
-  background: #1a1a22;
-  border: 1px solid #2a2a35;
+  background: #111122;
+  border: 1px solid #2a2a4a;
+  box-shadow: inset 0 0 20px rgba(80,80,255,0.05);
 }
 .dpad-btn {
   position: absolute;
   display: flex; align-items: center; justify-content: center;
-  color: #c0c0c8; font-size: 26px;
+  color: #5566ff; font-size: 26px;
   cursor: pointer;
   z-index: 2;
   border-radius: 12px;
   transition: background 0.1s, color 0.1s;
 }
-.dpad-btn:active { color: #fff; background: rgba(60, 100, 200, 0.25); }
+.dpad-btn:active { color: #fff; background: rgba(85, 102, 255, 0.3); }
 .dpad-up    { top: 6px;    left: 50%; transform: translateX(-50%); width: 80px; height: 72px; }
 .dpad-down  { bottom: 6px; left: 50%; transform: translateX(-50%); width: 80px; height: 72px; }
 .dpad-left  { left: 6px;   top: 50%; transform: translateY(-50%); width: 72px; height: 80px; }
@@ -179,14 +181,15 @@ body {
   position: absolute;
   top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 80px; height: 80px; border-radius: 50%;
-  background: #222233;
-  border: 1px solid #333345;
+  background: #1a1a35;
+  border: 2px solid #5566ff;
   display: flex; align-items: center; justify-content: center;
-  font-size: 17px; font-weight: 600; color: #d0d0d8;
+  font-size: 17px; font-weight: 600; color: #5566ff;
   cursor: pointer; z-index: 3;
   transition: background 0.1s;
+  box-shadow: 0 0 12px rgba(85,102,255,0.3);
 }
-.dpad-ok:active { background: #3355aa; color: #fff; }
+.dpad-ok:active { background: #5566ff; color: #fff; }
 
 /* Nav row */
 .nav-row {
@@ -197,15 +200,15 @@ body {
 }
 .nav-btn {
   height: 50px; border-radius: 25px;
-  background: #1e1e28;
-  border: 1px solid #2a2a35;
-  color: #c0c0c8;
+  background: #13132a;
+  border: 1px solid #2a2a4a;
+  color: #8888cc;
   font-size: 16px; font-weight: 500;
   cursor: pointer;
   transition: background 0.1s;
   display: flex; align-items: center; justify-content: center;
 }
-.nav-btn:active { background: #3355aa; color: #fff; }
+.nav-btn:active { background: #5566ff; color: #fff; }
 
 /* Bottom controls */
 .bottom-row {
@@ -218,68 +221,69 @@ body {
 .vol-rocker {
   display: flex; flex-direction: column;
   border-radius: 32px;
-  background: #1a1a22;
-  border: 1px solid #2a2a35;
+  background: #111125;
+  border: 1px solid #2a2a4a;
   overflow: hidden;
   width: 68px;
 }
 .vol-btn {
   height: 58px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 24px; font-weight: 600; color: #c0c0c8;
+  font-size: 24px; font-weight: 600; color: #8888cc;
   cursor: pointer;
   transition: background 0.1s;
 }
-.vol-btn:active { background: #3355aa; color: #fff; }
+.vol-btn:active { background: #5566ff; color: #fff; }
 .vol-divider {
-  height: 1px; background: #2a2a35; margin: 0 10px;
+  height: 1px; background: #2a2a4a; margin: 0 10px;
 }
 
 /* Mute */
 .mute-btn {
   width: 68px; height: 40px; border-radius: 20px;
-  background: #1e1e28; border: 1px solid #2a2a35;
-  color: #c0c0c8; font-size: 13px; font-weight: 500;
+  background: #111125; border: 1px solid #2a2a4a;
+  color: #8888cc; font-size: 13px; font-weight: 500;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: background 0.1s;
 }
-.mute-btn:active { background: #3355aa; color: #fff; }
+.mute-btn:active { background: #5566ff; color: #fff; }
 
 /* Power */
 .power-btn {
   width: 64px; height: 64px; border-radius: 50%;
-  background: #3a1515;
-  border: 2px solid #5a2020;
-  color: #e04040;
+  background: #1a0a0a;
+  border: 2px solid #ff3355;
+  color: #ff3355;
   font-size: 28px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.1s;
+  box-shadow: 0 0 12px rgba(255,51,85,0.3);
 }
-.power-btn:active { background: #c02020; color: #fff; }
+.power-btn:active { background: #ff3355; color: #fff; }
 
 /* Channel rocker */
 .ch-rocker {
   display: flex; flex-direction: column;
   border-radius: 32px;
-  background: #1a1a22;
-  border: 1px solid #2a2a35;
+  background: #111125;
+  border: 1px solid #2a2a4a;
   overflow: hidden;
   width: 68px;
 }
 .ch-btn {
   height: 58px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 14px; font-weight: 600; color: #c0c0c8;
+  font-size: 14px; font-weight: 600; color: #8888cc;
   cursor: pointer;
   transition: background 0.1s;
 }
-.ch-btn:active { background: #3355aa; color: #fff; }
+.ch-btn:active { background: #5566ff; color: #fff; }
 
 /* Feedback toast */
 .toast {
   position: fixed; bottom: calc(40px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
-  background: rgba(50, 80, 180, 0.85);
+  background: rgba(85, 102, 255, 0.85);
   color: #fff; font-size: 14px; font-weight: 600;
   padding: 8px 20px; border-radius: 20px;
   opacity: 0; transition: opacity 0.15s;
