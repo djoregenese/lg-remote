@@ -47,9 +47,26 @@ from lg_remote import (
     WebSocketInputClient,
     authenticate,
     get_input_socket_url,
+    launch_app,
     TV_HOST,
     TV_PORT,
 )
+
+# App icon filenames (128x128 PNGs in icons/ directory)
+APP_ICON_FILES = {
+    "youtube": "youtube.png",
+    "plex": "plex.png",
+    "appletv": "appletv.png",
+    "paramount": "paramount.png",
+}
+
+# App shortcuts — (label, app_id, icon_key)
+APP_SHORTCUTS = [
+    ("YT",   "youtube.leanback.v4",            "youtube"),
+    ("Plex", "cdp-30",                          "plex"),
+    ("",     "com.apple.appletv",               "appletv"),
+    ("P+",   "com.cbs-all-access.webapp.prod",  "paramount"),
+]
 
 # Key code to TV button mapping (macOS virtual key codes)
 KEYCODE_MAP = {
@@ -73,7 +90,7 @@ KEYCODE_MAP = {
 }
 
 WINDOW_WIDTH = 220
-WINDOW_HEIGHT = 540
+WINDOW_HEIGHT = 575
 
 # -- Color palette (Neon Accent theme) --
 COLOR_BODY_BG = (0.05, 0.05, 0.08, 0.95)
@@ -100,7 +117,7 @@ COLOR_TRACKPAD_ACTIVE = (0.15, 0.20, 0.50, 0.4)
 
 # Trackpad zone geometry
 TRACKPAD_X = 20
-TRACKPAD_Y = 385
+TRACKPAD_Y = 420
 TRACKPAD_W = WINDOW_WIDTH - 40
 TRACKPAD_H = 110
 
@@ -137,6 +154,24 @@ def make_color_t(tup):
     return make_color(*tup)
 
 
+def load_icon_images():
+    """Load PNG icon files from the icons/ directory into NSImage objects."""
+    from AppKit import NSImage
+    icons_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+    icons = {}
+    for name, filename in APP_ICON_FILES.items():
+        path = os.path.join(icons_dir, filename)
+        if os.path.exists(path):
+            img = NSImage.alloc().initWithContentsOfFile_(path)
+            if img:
+                icons[name] = img
+    return icons
+
+
+# Pre-load icons at import time
+APP_ICONS = load_icon_images()
+
+
 class RemotePanel(NSPanel):
     """NSPanel subclass that terminates the app on close."""
 
@@ -161,6 +196,7 @@ class RemoteView(NSView):
         self.onPointerClick = None     # callback()
         self.onPointerScroll = None    # callback(dx, dy)
         self.onTrackpadToggle = None   # callback(bool) — notify delegate of mode change
+        self.onAppLaunch = None        # callback(app_id)
         return self
 
     def isFlipped(self):
@@ -180,6 +216,7 @@ class RemoteView(NSView):
         self.draw_title()
         self.draw_dpad()
         self.draw_nav_buttons()
+        self.draw_app_shortcuts()
         self.draw_volume_rocker()
         self.draw_power_button()
         self.draw_trackpad_zone()
@@ -354,11 +391,70 @@ class RemoteView(NSView):
         tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_TEXT)
         self.draw_label(label, x, y + 5, w, h - 8, size=12, color=tc)
 
+    # -- App shortcut buttons --
+
+    APP_ROW_Y = 262
+    APP_BTN_SIZE = 38
+    APP_BTN_GAP = 10
+
+    def _app_layout(self):
+        """Return list of (x, y, app_tuple) for each app button."""
+        n = len(APP_SHORTCUTS)
+        s = self.APP_BTN_SIZE
+        gap = self.APP_BTN_GAP
+        total_w = n * s + (n - 1) * gap
+        start_x = (WINDOW_WIDTH - total_w) / 2
+        result = []
+        for i, app in enumerate(APP_SHORTCUTS):
+            x = start_x + i * (s + gap)
+            result.append((x, self.APP_ROW_Y, app))
+        return result
+
+    def draw_app_shortcuts(self):
+        s = self.APP_BTN_SIZE
+
+        for x, y, (label, app_id, icon_key) in self._app_layout():
+            is_active = self.activeButton == f"APP:{app_id}"
+            rect = NSMakeRect(x, y, s, s)
+
+            # Draw the icon image (rounded via clipping, with padding)
+            icon_img = APP_ICONS.get(icon_key)
+            if icon_img:
+                pad = 4
+                icon_rect = NSMakeRect(x + pad, y + pad, s - 2 * pad, s - 2 * pad)
+                AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
+                clip_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(icon_rect, 8, 8)
+                clip_path.addClip()
+                # Flip vertically to correct upside-down rendering
+                xform = AppKit.NSAffineTransform.transform()
+                xform.translateXBy_yBy_(0, y + pad + (s - 2 * pad))
+                xform.scaleXBy_yBy_(1.0, -1.0)
+                xform.translateXBy_yBy_(0, -(y + pad))
+                xform.concat()
+                icon_img.drawInRect_fromRect_operation_fraction_(
+                    icon_rect, ((0, 0), icon_img.size()), AppKit.NSCompositeSourceOver, 1.0)
+                AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
+
+            # Active overlay
+            if is_active:
+                path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(rect, 10, 10)
+                make_color(1, 1, 1, 0.3).set()
+                path.fill()
+
+    def _app_button_hit(self, event):
+        """Return the app_id if click is on an app button, else None."""
+        loc = self.convertPoint_fromView_(event.locationInWindow(), None)
+        s = self.APP_BTN_SIZE
+        for x, y, (label, app_id, icon_key) in self._app_layout():
+            if x <= loc.x <= x + s and y <= loc.y <= y + s:
+                return app_id
+        return None
+
     # -- Volume rocker (tall pill with +/- sections) --
 
     def draw_volume_rocker(self):
         vx = 30
-        vy = 275
+        vy = 310
         vw = 50
         vh = 70
         radius = vw / 2
@@ -421,7 +517,7 @@ class RemoteView(NSView):
 
     def draw_power_button(self):
         px = WINDOW_WIDTH - 78
-        py = 300
+        py = 335
         pw, ph = 50, 50
 
         is_active = self.activeButton == "POWER"
@@ -565,6 +661,14 @@ class RemoteView(NSView):
             # While in trackpad mode, click = TV click
             if self.onPointerClick:
                 self.onPointerClick()
+            return
+
+        # Check app shortcut buttons
+        app_id = self._app_button_hit(event)
+        if app_id:
+            if self.onAppLaunch:
+                self.onAppLaunch(app_id)
+            self.flash_button(f"APP:{app_id}")
             return
 
         if self._point_in_trackpad(event):
@@ -748,6 +852,15 @@ class AppDelegate(NSObject):
         self.remote_view.onPointerMove = self.send_pointer_move
         self.remote_view.onPointerClick = self.send_pointer_click
         self.remote_view.onPointerScroll = self.send_pointer_scroll
+        self.remote_view.onAppLaunch = self.send_app_launch
+
+    def send_app_launch(self, app_id):
+        if self.ws:
+            try:
+                launch_app(self.ws, app_id)
+            except Exception:
+                self.remote_view.update_status("Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
 
     def send_pointer_move(self, dx, dy):
         if self.input_ws:
