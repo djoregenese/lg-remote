@@ -214,18 +214,40 @@ class WebSocketInputClient:
         if "101" not in resp:
             raise ConnectionError(f"Input socket upgrade failed: {resp[:100]}")
 
-    def send_button(self, button_name):
-        msg = f"type:button\nname:{button_name}\n\n"
+    def _send_raw(self, msg):
+        """Send a raw text message over the WebSocket."""
         payload = msg.encode()
         frame = bytearray([0x81])
         mask_key = os.urandom(4)
         length = len(payload)
-        frame.append(0x80 | length)
+        if length < 126:
+            frame.append(0x80 | length)
+        elif length < 65536:
+            frame.append(0x80 | 126)
+            frame.extend(length.to_bytes(2, "big"))
+        else:
+            frame.append(0x80 | 127)
+            frame.extend(length.to_bytes(8, "big"))
         frame.extend(mask_key)
         frame.extend(
             bytearray(b ^ mask_key[i % 4] for i, b in enumerate(payload))
         )
         self.sock.send(frame)
+
+    def send_button(self, button_name):
+        self._send_raw(f"type:button\nname:{button_name}\n\n")
+
+    def send_move(self, dx, dy, drag=0):
+        """Send pointer move. dx/dy are relative pixel deltas."""
+        self._send_raw(f"type:move\ndx:{dx}\ndy:{dy}\ndrag:{drag}\n\n")
+
+    def send_click(self):
+        """Send pointer click at current position."""
+        self._send_raw(f"type:click\n\n")
+
+    def send_scroll(self, dx, dy):
+        """Send scroll event. dy>0 = scroll down, dy<0 = scroll up."""
+        self._send_raw(f"type:scroll\ndx:{dx}\ndy:{dy}\n\n")
 
     def send_ping(self):
         """Send a WebSocket ping frame. Raises on dead connection."""
