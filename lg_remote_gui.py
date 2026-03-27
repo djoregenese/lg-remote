@@ -197,6 +197,7 @@ class RemoteView(NSView):
         self.onPointerScroll = None    # callback(dx, dy)
         self.onTrackpadToggle = None   # callback(bool) — notify delegate of mode change
         self.onAppLaunch = None        # callback(app_id)
+        self.onButtonPress = None      # callback(btn_name) — send button to TV
         return self
 
     def isFlipped(self):
@@ -256,7 +257,7 @@ class RemoteView(NSView):
 
     def draw_title(self):
         self.draw_label("LG Remote", 0, 38, WINDOW_WIDTH, 24,
-                        size=16, bold=True, color=make_color_t(COLOR_TEXT))
+                        size=16, bold=True, color=make_color(1, 1, 1, 1))
 
     # -- D-pad (circular with arc segments) --
 
@@ -272,18 +273,31 @@ class RemoteView(NSView):
         make_color_t(COLOR_DPAD_BG).set()
         outer_path.fill()
 
-        # Draw four arc segments (UP, RIGHT, DOWN, LEFT)
-        directions = [
-            ("UP",    -135, -45),
-            ("RIGHT",  -45,  45),
-            ("DOWN",    45, 135),
-            ("LEFT",   135, 225),
-        ]
-
-        for btn_id, start_angle, end_angle in directions:
-            is_active = self.activeButton == btn_id
-            self.draw_arc_segment(cx, cy, inner_r + 4, outer_r - 3,
-                                  start_angle, end_angle, is_active)
+        # Draw highlight for active d-pad direction using simple clip rects
+        active_dir = self.activeButton
+        if active_dir in ("UP", "DOWN", "LEFT", "RIGHT"):
+            AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
+            # Clip to d-pad ring (between inner and outer circles)
+            ring_path = NSBezierPath.bezierPathWithOvalInRect_(outer_rect)
+            inner_clip = NSBezierPath.bezierPathWithOvalInRect_(
+                NSMakeRect(cx - inner_r - 2, cy - inner_r - 2,
+                           (inner_r + 2) * 2, (inner_r + 2) * 2))
+            ring_path.appendBezierPath_(inner_clip.bezierPathByReversingPath())
+            ring_path.addClip()
+            # Clip to the correct quadrant
+            if active_dir == "UP":
+                clip_rect = NSMakeRect(cx - outer_r, cy - outer_r, outer_r * 2, outer_r)
+            elif active_dir == "DOWN":
+                clip_rect = NSMakeRect(cx - outer_r, cy, outer_r * 2, outer_r)
+            elif active_dir == "LEFT":
+                clip_rect = NSMakeRect(cx - outer_r, cy - outer_r, outer_r, outer_r * 2)
+            else:  # RIGHT
+                clip_rect = NSMakeRect(cx, cy - outer_r, outer_r, outer_r * 2)
+            NSBezierPath.clipRect_(clip_rect)
+            make_color_t(COLOR_DPAD_ACTIVE).set()
+            NSBezierPath.fillRect_(NSMakeRect(cx - outer_r, cy - outer_r,
+                                              outer_r * 2, outer_r * 2))
+            AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
 
         # Draw directional arrows on each segment
         arrow_dist = (inner_r + outer_r) / 2
@@ -295,10 +309,10 @@ class RemoteView(NSView):
         ]
         for btn_id, ax, ay, symbol in arrows:
             is_active = self.activeButton == btn_id
-            tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_TEXT)
+            tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_ACCENT_BLUE)
             self.draw_label(symbol, ax - 10, ay - 8, 20, 16, size=12, color=tc)
 
-        # OK button in center
+        # OK button in center — bright blue neon ring
         ok_active = self.activeButton == "ENTER"
         ok_rect = NSMakeRect(cx - inner_r, cy - inner_r, inner_r * 2, inner_r * 2)
         ok_path = NSBezierPath.bezierPathWithOvalInRect_(ok_rect)
@@ -307,48 +321,13 @@ class RemoteView(NSView):
         else:
             make_color_t(COLOR_OK_BG).set()
         ok_path.fill()
-        make_color_t(COLOR_BTN_BORDER).set()
-        ok_path.setLineWidth_(1.0)
+        make_color_t(COLOR_ACCENT_BLUE).set()
+        ok_path.setLineWidth_(2.0)
         ok_path.stroke()
 
-        tc = make_color(1, 1, 1, 1) if ok_active else make_color_t(COLOR_TEXT)
+        tc = make_color(1, 1, 1, 1) if ok_active else make_color_t(COLOR_ACCENT_BLUE)
         self.draw_label("OK", cx - 15, cy - 8, 30, 16, size=13, bold=True, color=tc)
 
-    def draw_arc_segment(self, cx, cy, r_inner, r_outer, start_deg, end_deg, active):
-        """Draw an arc segment between two radii. Angles in degrees, flipped-Y."""
-        path = NSBezierPath.alloc().init()
-
-        # In flipped coordinates, we negate angles to match expected visual direction
-        sa_rad = math.radians(-start_deg)
-        ea_rad = math.radians(-end_deg)
-
-        # Outer arc (counterclockwise in flipped = clockwise visually)
-        path.moveToPoint_(NSMakePoint(
-            cx + r_outer * math.cos(sa_rad),
-            cy - r_outer * math.sin(sa_rad)
-        ))
-        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
-            NSMakePoint(cx, cy), r_outer, -start_deg, -end_deg, True
-        )
-
-        # Line to inner arc
-        path.lineToPoint_(NSMakePoint(
-            cx + r_inner * math.cos(ea_rad),
-            cy - r_inner * math.sin(ea_rad)
-        ))
-
-        # Inner arc (clockwise in flipped = counterclockwise visually)
-        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
-            NSMakePoint(cx, cy), r_inner, -end_deg, -start_deg, False
-        )
-
-        path.closePath()
-
-        if active:
-            make_color_t(COLOR_DPAD_ACTIVE).set()
-        else:
-            make_color_t(COLOR_DPAD_SEGMENT).set()
-        path.fill()
 
     # -- Navigation buttons (Menu, Back, Home, Info) --
 
@@ -530,8 +509,8 @@ class RemoteView(NSView):
             make_color_t(COLOR_POWER_BG).set()
         power_path.fill()
 
-        make_color(0.6, 0.2, 0.2, 0.6).set()
-        power_path.setLineWidth_(1.5)
+        make_color_t(COLOR_ACCENT_RED).set()
+        power_path.setLineWidth_(2.0)
         power_path.stroke()
 
         tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_ACCENT_RED)
@@ -652,6 +631,65 @@ class RemoteView(NSView):
             self.onTrackpadToggle(False)
         self.setNeedsDisplay_(True)
 
+    def _button_hit(self, event):
+        """Return button ID if click lands on a clickable element, else None."""
+        loc = self.convertPoint_fromView_(event.locationInWindow(), None)
+        x, y = loc.x, loc.y
+
+        # D-pad (circular)
+        cx, cy = WINDOW_WIDTH / 2, 120
+        outer_r, inner_r = 60, 24
+        dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+        if dist <= outer_r:
+            if dist <= inner_r:
+                return "ENTER"
+            # Determine direction by angle
+            angle = math.degrees(math.atan2(y - cy, x - cx))
+            if -45 <= angle < 45:
+                return "RIGHT"
+            elif 45 <= angle < 135:
+                return "DOWN"
+            elif angle >= 135 or angle < -135:
+                return "LEFT"
+            else:
+                return "UP"
+
+        # Nav buttons (Menu, Back, Home, Info)
+        nav_y = 195
+        btn_w, btn_h, gap = 80, 28, 10
+        col1_x = WINDOW_WIDTH / 2 - btn_w - gap / 2
+        col2_x = WINDOW_WIDTH / 2 + gap / 2
+        nav_buttons = [
+            ("MENU", col1_x, nav_y),
+            ("BACK", col2_x, nav_y),
+            ("HOME", col1_x, nav_y + btn_h + 8),
+            ("INFO", col2_x, nav_y + btn_h + 8),
+        ]
+        for btn_id, bx, by in nav_buttons:
+            if bx <= x <= bx + btn_w and by <= y <= by + btn_h:
+                return btn_id
+
+        # Volume rocker
+        vx, vy, vw, vh = 30, 310, 50, 70
+        if vx <= x <= vx + vw and vy <= y <= vy + vh:
+            if y < vy + vh / 2:
+                return "VOLUMEUP"
+            else:
+                return "VOLUMEDOWN"
+
+        # Mute button
+        mute_y = vy + vh + 10
+        if vx - 2 <= x <= vx + vw + 2 and mute_y <= y <= mute_y + 26:
+            return "MUTE"
+
+        # Power button
+        px, py, pw = WINDOW_WIDTH - 78, 335, 50
+        pcx, pcy = px + pw / 2, py + pw / 2
+        if math.sqrt((x - pcx) ** 2 + (y - pcy) ** 2) <= pw / 2:
+            return "POWER"
+
+        return None
+
     def mouseDown_(self, event):
         # Activate the app so local key monitor works
         NSApp.activateIgnoringOtherApps_(True)
@@ -674,9 +712,17 @@ class RemoteView(NSView):
         if self._point_in_trackpad(event):
             # Click on trackpad zone → enter pointer mode
             self.enterTrackpadMode()
-        else:
-            # Window drag mode
-            self.dragOrigin = event.locationInWindow()
+            return
+
+        # Check all other buttons (d-pad, nav, volume, power)
+        btn = self._button_hit(event)
+        if btn and self.onButtonPress:
+            self.onButtonPress(btn)
+            self.flash_button(btn)
+            return
+
+        # Window drag mode
+        self.dragOrigin = event.locationInWindow()
 
     def mouseDragged_(self, event):
         if self.trackpadSelected:
@@ -853,6 +899,15 @@ class AppDelegate(NSObject):
         self.remote_view.onPointerClick = self.send_pointer_click
         self.remote_view.onPointerScroll = self.send_pointer_scroll
         self.remote_view.onAppLaunch = self.send_app_launch
+        self.remote_view.onButtonPress = self.send_button_press
+
+    def send_button_press(self, btn_name):
+        if self.input_ws:
+            try:
+                self.input_ws.send_button(btn_name)
+            except Exception:
+                self.remote_view.update_status("Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
 
     def send_app_launch(self, app_id):
         if self.ws:
