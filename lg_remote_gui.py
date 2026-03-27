@@ -274,10 +274,12 @@ class RemoteView(NSView):
         outer_path.fill()
 
         # Draw four arc segments (UP, RIGHT, DOWN, LEFT)
+        # In flipped coords (Y down), angles are negated in draw_arc_segment,
+        # so we define them in screen space: 0°=right, clockwise positive
         directions = [
-            ("UP",    -135, -45),
+            ("UP",      45, 135),
             ("RIGHT",  -45,  45),
-            ("DOWN",    45, 135),
+            ("DOWN",  -135, -45),
             ("LEFT",   135, 225),
         ]
 
