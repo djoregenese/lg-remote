@@ -273,20 +273,31 @@ class RemoteView(NSView):
         make_color_t(COLOR_DPAD_BG).set()
         outer_path.fill()
 
-        # Draw four arc segments (UP, RIGHT, DOWN, LEFT)
-        # In flipped coords (Y down), angles are negated in draw_arc_segment,
-        # so we define them in screen space: 0°=right, clockwise positive
-        directions = [
-            ("UP",      45, 135),
-            ("RIGHT",  -45,  45),
-            ("DOWN",  -135, -45),
-            ("LEFT",   135, 225),
-        ]
-
-        for btn_id, start_angle, end_angle in directions:
-            is_active = self.activeButton == btn_id
-            self.draw_arc_segment(cx, cy, inner_r + 4, outer_r - 3,
-                                  start_angle, end_angle, is_active)
+        # Draw highlight for active d-pad direction using simple clip rects
+        active_dir = self.activeButton
+        if active_dir in ("UP", "DOWN", "LEFT", "RIGHT"):
+            AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
+            # Clip to d-pad ring (between inner and outer circles)
+            ring_path = NSBezierPath.bezierPathWithOvalInRect_(outer_rect)
+            inner_clip = NSBezierPath.bezierPathWithOvalInRect_(
+                NSMakeRect(cx - inner_r - 2, cy - inner_r - 2,
+                           (inner_r + 2) * 2, (inner_r + 2) * 2))
+            ring_path.appendBezierPath_(inner_clip.bezierPathByReversingPath())
+            ring_path.addClip()
+            # Clip to the correct quadrant
+            if active_dir == "UP":
+                clip_rect = NSMakeRect(cx - outer_r, cy - outer_r, outer_r * 2, outer_r)
+            elif active_dir == "DOWN":
+                clip_rect = NSMakeRect(cx - outer_r, cy, outer_r * 2, outer_r)
+            elif active_dir == "LEFT":
+                clip_rect = NSMakeRect(cx - outer_r, cy - outer_r, outer_r, outer_r * 2)
+            else:  # RIGHT
+                clip_rect = NSMakeRect(cx, cy - outer_r, outer_r, outer_r * 2)
+            NSBezierPath.clipRect_(clip_rect)
+            make_color_t(COLOR_DPAD_ACTIVE).set()
+            NSBezierPath.fillRect_(NSMakeRect(cx - outer_r, cy - outer_r,
+                                              outer_r * 2, outer_r * 2))
+            AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
 
         # Draw directional arrows on each segment
         arrow_dist = (inner_r + outer_r) / 2
@@ -317,41 +328,6 @@ class RemoteView(NSView):
         tc = make_color(1, 1, 1, 1) if ok_active else make_color_t(COLOR_ACCENT_BLUE)
         self.draw_label("OK", cx - 15, cy - 8, 30, 16, size=13, bold=True, color=tc)
 
-    def draw_arc_segment(self, cx, cy, r_inner, r_outer, start_deg, end_deg, active):
-        """Draw an arc segment between two radii. Angles in degrees, flipped-Y."""
-        path = NSBezierPath.alloc().init()
-
-        # In flipped coordinates, we negate angles to match expected visual direction
-        sa_rad = math.radians(-start_deg)
-        ea_rad = math.radians(-end_deg)
-
-        # Outer arc (counterclockwise in flipped = clockwise visually)
-        path.moveToPoint_(NSMakePoint(
-            cx + r_outer * math.cos(sa_rad),
-            cy - r_outer * math.sin(sa_rad)
-        ))
-        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
-            NSMakePoint(cx, cy), r_outer, -start_deg, -end_deg, True
-        )
-
-        # Line to inner arc
-        path.lineToPoint_(NSMakePoint(
-            cx + r_inner * math.cos(ea_rad),
-            cy - r_inner * math.sin(ea_rad)
-        ))
-
-        # Inner arc (clockwise in flipped = counterclockwise visually)
-        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
-            NSMakePoint(cx, cy), r_inner, -end_deg, -start_deg, False
-        )
-
-        path.closePath()
-
-        if active:
-            make_color_t(COLOR_DPAD_ACTIVE).set()
-        else:
-            make_color_t(COLOR_DPAD_SEGMENT).set()
-        path.fill()
 
     # -- Navigation buttons (Menu, Back, Home, Info) --
 
