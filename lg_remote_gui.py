@@ -256,7 +256,7 @@ class RemoteView(NSView):
 
     def draw_title(self):
         self.draw_label("LG Remote", 0, 38, WINDOW_WIDTH, 24,
-                        size=16, bold=True, color=make_color_t(COLOR_TEXT))
+                        size=16, bold=True, color=make_color(1, 1, 1, 1))
 
     # -- D-pad (circular with arc segments) --
 
@@ -295,10 +295,10 @@ class RemoteView(NSView):
         ]
         for btn_id, ax, ay, symbol in arrows:
             is_active = self.activeButton == btn_id
-            tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_TEXT)
+            tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_ACCENT_BLUE)
             self.draw_label(symbol, ax - 10, ay - 8, 20, 16, size=12, color=tc)
 
-        # OK button in center
+        # OK button in center — bright blue neon ring
         ok_active = self.activeButton == "ENTER"
         ok_rect = NSMakeRect(cx - inner_r, cy - inner_r, inner_r * 2, inner_r * 2)
         ok_path = NSBezierPath.bezierPathWithOvalInRect_(ok_rect)
@@ -307,11 +307,11 @@ class RemoteView(NSView):
         else:
             make_color_t(COLOR_OK_BG).set()
         ok_path.fill()
-        make_color_t(COLOR_BTN_BORDER).set()
-        ok_path.setLineWidth_(1.0)
+        make_color_t(COLOR_ACCENT_BLUE).set()
+        ok_path.setLineWidth_(2.0)
         ok_path.stroke()
 
-        tc = make_color(1, 1, 1, 1) if ok_active else make_color_t(COLOR_TEXT)
+        tc = make_color(1, 1, 1, 1) if ok_active else make_color_t(COLOR_ACCENT_BLUE)
         self.draw_label("OK", cx - 15, cy - 8, 30, 16, size=13, bold=True, color=tc)
 
     def draw_arc_segment(self, cx, cy, r_inner, r_outer, start_deg, end_deg, active):
@@ -530,8 +530,8 @@ class RemoteView(NSView):
             make_color_t(COLOR_POWER_BG).set()
         power_path.fill()
 
-        make_color(0.6, 0.2, 0.2, 0.6).set()
-        power_path.setLineWidth_(1.5)
+        make_color_t(COLOR_ACCENT_RED).set()
+        power_path.setLineWidth_(2.0)
         power_path.stroke()
 
         tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_ACCENT_RED)
