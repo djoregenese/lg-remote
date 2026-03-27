@@ -197,6 +197,7 @@ class RemoteView(NSView):
         self.onPointerScroll = None    # callback(dx, dy)
         self.onTrackpadToggle = None   # callback(bool) — notify delegate of mode change
         self.onAppLaunch = None        # callback(app_id)
+        self.onButtonPress = None      # callback(btn_name) — send button to TV
         return self
 
     def isFlipped(self):
@@ -652,6 +653,65 @@ class RemoteView(NSView):
             self.onTrackpadToggle(False)
         self.setNeedsDisplay_(True)
 
+    def _button_hit(self, event):
+        """Return button ID if click lands on a clickable element, else None."""
+        loc = self.convertPoint_fromView_(event.locationInWindow(), None)
+        x, y = loc.x, loc.y
+
+        # D-pad (circular)
+        cx, cy = WINDOW_WIDTH / 2, 120
+        outer_r, inner_r = 60, 24
+        dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+        if dist <= outer_r:
+            if dist <= inner_r:
+                return "ENTER"
+            # Determine direction by angle
+            angle = math.degrees(math.atan2(y - cy, x - cx))
+            if -45 <= angle < 45:
+                return "RIGHT"
+            elif 45 <= angle < 135:
+                return "DOWN"
+            elif angle >= 135 or angle < -135:
+                return "LEFT"
+            else:
+                return "UP"
+
+        # Nav buttons (Menu, Back, Home, Info)
+        nav_y = 195
+        btn_w, btn_h, gap = 80, 28, 10
+        col1_x = WINDOW_WIDTH / 2 - btn_w - gap / 2
+        col2_x = WINDOW_WIDTH / 2 + gap / 2
+        nav_buttons = [
+            ("MENU", col1_x, nav_y),
+            ("BACK", col2_x, nav_y),
+            ("HOME", col1_x, nav_y + btn_h + 8),
+            ("INFO", col2_x, nav_y + btn_h + 8),
+        ]
+        for btn_id, bx, by in nav_buttons:
+            if bx <= x <= bx + btn_w and by <= y <= by + btn_h:
+                return btn_id
+
+        # Volume rocker
+        vx, vy, vw, vh = 30, 310, 50, 70
+        if vx <= x <= vx + vw and vy <= y <= vy + vh:
+            if y < vy + vh / 2:
+                return "VOLUMEUP"
+            else:
+                return "VOLUMEDOWN"
+
+        # Mute button
+        mute_y = vy + vh + 10
+        if vx - 2 <= x <= vx + vw + 2 and mute_y <= y <= mute_y + 26:
+            return "MUTE"
+
+        # Power button
+        px, py, pw = WINDOW_WIDTH - 78, 335, 50
+        pcx, pcy = px + pw / 2, py + pw / 2
+        if math.sqrt((x - pcx) ** 2 + (y - pcy) ** 2) <= pw / 2:
+            return "POWER"
+
+        return None
+
     def mouseDown_(self, event):
         # Activate the app so local key monitor works
         NSApp.activateIgnoringOtherApps_(True)
@@ -674,9 +734,17 @@ class RemoteView(NSView):
         if self._point_in_trackpad(event):
             # Click on trackpad zone → enter pointer mode
             self.enterTrackpadMode()
-        else:
-            # Window drag mode
-            self.dragOrigin = event.locationInWindow()
+            return
+
+        # Check all other buttons (d-pad, nav, volume, power)
+        btn = self._button_hit(event)
+        if btn and self.onButtonPress:
+            self.onButtonPress(btn)
+            self.flash_button(btn)
+            return
+
+        # Window drag mode
+        self.dragOrigin = event.locationInWindow()
 
     def mouseDragged_(self, event):
         if self.trackpadSelected:
@@ -853,6 +921,15 @@ class AppDelegate(NSObject):
         self.remote_view.onPointerClick = self.send_pointer_click
         self.remote_view.onPointerScroll = self.send_pointer_scroll
         self.remote_view.onAppLaunch = self.send_app_launch
+        self.remote_view.onButtonPress = self.send_button_press
+
+    def send_button_press(self, btn_name):
+        if self.input_ws:
+            try:
+                self.input_ws.send_button(btn_name)
+            except Exception:
+                self.remote_view.update_status("Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
 
     def send_app_launch(self, app_id):
         if self.ws:
