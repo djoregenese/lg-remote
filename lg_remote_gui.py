@@ -105,27 +105,28 @@ TRACKPAD_W = WINDOW_WIDTH - 40
 TRACKPAD_H = 110
 
 
-def apply_sensitivity(raw_dx, raw_dy):
-    """Convert raw trackpad deltas to TV pointer deltas.
+class Sensitivity:
+    """Accumulates fractional deltas so small movements aren't lost to int truncation."""
+    def __init__(self, multiplier=2.0):
+        self.multiplier = multiplier
+        self.accum_x = 0.0
+        self.accum_y = 0.0
 
-    Args:
-        raw_dx: Raw horizontal delta from NSEvent.deltaX() (float, pixels)
-        raw_dy: Raw vertical delta from NSEvent.deltaY() (float, pixels)
+    def apply(self, raw_dx, raw_dy):
+        self.accum_x += raw_dx * self.multiplier
+        self.accum_y += raw_dy * self.multiplier
+        dx = int(self.accum_x)
+        dy = int(self.accum_y)
+        self.accum_x -= dx
+        self.accum_y -= dy
+        return dx, dy
 
-    Returns:
-        (int, int): Scaled dx, dy to send to the TV via send_move()
+    def reset(self):
+        self.accum_x = 0.0
+        self.accum_y = 0.0
 
-    TODO: Implement your preferred sensitivity curve. Consider:
-      - Linear (multiplier): simple, predictable — good starting point
-      - Exponential/power curve: slow for fine control, fast for big swipes
-      - Dead zone: ignore tiny movements to prevent jitter
-      - The TV screen is ~1920px wide; macOS trackpad deltas are typically 1-20 per event
-    """
-    # Linear scaling — adjust multiplier to taste
-    sensitivity = 1.5
-    dx = int(raw_dx * sensitivity)
-    dy = int(raw_dy * sensitivity)
-    return dx, dy
+
+pointer_sensitivity = Sensitivity(multiplier=2.0)
 
 
 def make_color(r, g, b, a=1.0):
@@ -576,7 +577,7 @@ class RemoteView(NSView):
     def mouseDragged_(self, event):
         if self.trackpadSelected:
             # In trackpad mode, drags also move the pointer
-            dx, dy = apply_sensitivity(event.deltaX(), event.deltaY())
+            dx, dy = pointer_sensitivity.apply(event.deltaX(), event.deltaY())
             if self.onPointerMove and (dx or dy):
                 self.onPointerMove(dx, dy)
             return
@@ -768,7 +769,8 @@ class AppDelegate(NSObject):
     def handle_trackpad_toggle(self, entering):
         """Called when trackpad mode is entered/exited."""
         if entering:
-            # Hide cursor and freeze it so it can't leave the window
+            # Reset accumulator and hide/freeze cursor
+            pointer_sensitivity.reset()
             Quartz.CGAssociateMouseAndMouseCursorPosition(False)
             AppKit.NSCursor.hide()
 
@@ -778,7 +780,7 @@ class AppDelegate(NSObject):
                 if event_type == Quartz.kCGEventMouseMoved:
                     raw_dx = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaX)
                     raw_dy = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaY)
-                    dx, dy = apply_sensitivity(raw_dx, raw_dy)
+                    dx, dy = pointer_sensitivity.apply(raw_dx, raw_dy)
                     if dx or dy:
                         self.send_pointer_move(dx, dy)
                 elif event_type == Quartz.kCGEventScrollWheel:
