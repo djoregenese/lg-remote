@@ -10,6 +10,7 @@ import time
 
 import AppKit
 import objc
+import Quartz
 
 from AppKit import (
     NSApplication,
@@ -766,6 +767,11 @@ class AppDelegate(NSObject):
     def handle_trackpad_toggle(self, entering):
         """Called when trackpad mode is entered/exited."""
         if entering:
+            # Decouple cursor from trackpad — deltas keep flowing but
+            # the Mac cursor stays put, so it never hits window edges
+            Quartz.CGAssociateMouseAndMouseCursorPosition(False)
+            AppKit.NSCursor.hide()
+
             # Start monitoring mouse-moved + scroll events
             def handler(event):
                 if event.type() == AppKit.NSScrollWheel:
@@ -774,7 +780,7 @@ class AppDelegate(NSObject):
                     if dx or dy:
                         self.send_pointer_scroll(dx, dy)
                     return event
-                # Mouse moved
+                # Mouse moved — deltas are independent of cursor position
                 dx, dy = apply_sensitivity(event.deltaX(), event.deltaY())
                 if dx or dy:
                     self.send_pointer_move(dx, dy)
@@ -788,6 +794,9 @@ class AppDelegate(NSObject):
             if self._moveMonitor:
                 NSEvent.removeMonitor_(self._moveMonitor)
                 self._moveMonitor = None
+            # Re-associate cursor and show it
+            Quartz.CGAssociateMouseAndMouseCursorPosition(True)
+            AppKit.NSCursor.unhide()
 
     def send_pointer_scroll(self, dx, dy):
         if self.input_ws:
@@ -844,6 +853,10 @@ class AppDelegate(NSObject):
         return True
 
     def applicationWillTerminate_(self, notification):
+        # Restore cursor if still in trackpad mode
+        if self.remote_view and self.remote_view.trackpadSelected:
+            Quartz.CGAssociateMouseAndMouseCursorPosition(True)
+            AppKit.NSCursor.unhide()
         if self.input_ws:
             self.input_ws.close()
         if self.ws:
