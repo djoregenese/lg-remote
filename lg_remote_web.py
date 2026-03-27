@@ -14,9 +14,18 @@ from lg_remote import (
     WebSocketInputClient,
     authenticate,
     get_input_socket_url,
+    launch_app,
     TV_HOST,
     TV_PORT,
 )
+
+# App shortcuts — must match IDs from the GUI remote
+APP_SHORTCUTS = {
+    "youtube": "youtube.leanback.v4",
+    "plex": "cdp-30",
+    "appletv": "com.apple.appletv",
+    "paramount": "com.cbs-all-access.webapp.prod",
+}
 
 WEB_PORT = int(os.environ.get("WEB_PORT", "8888"))
 
@@ -91,6 +100,24 @@ def send_button(name):
             return False, "Not connected"
         try:
             tv_input.send_button(name)
+            return True, "OK"
+        except Exception as e:
+            tv_status["connected"] = False
+            tv_status["message"] = "Connection lost"
+            threading.Thread(target=connect_tv, daemon=True).start()
+            return False, str(e)
+
+
+def send_launch(app_key):
+    """Launch an app on the TV."""
+    app_id = APP_SHORTCUTS.get(app_key)
+    if not app_id:
+        return False, "Unknown app"
+    with tv_lock:
+        if not tv_ws or not tv_status["connected"]:
+            return False, "Not connected"
+        try:
+            launch_app(tv_ws, app_id)
             return True, "OK"
         except Exception as e:
             tv_status["connected"] = False
@@ -210,6 +237,23 @@ body {
 }
 .nav-btn:active { background: #5566ff; color: #fff; }
 
+/* App shortcuts */
+.app-row {
+  display: flex; justify-content: center; gap: 12px;
+  width: 100%; max-width: 340px;
+}
+.app-btn {
+  width: 56px; height: 56px; border-radius: 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.15);
+  transition: opacity 0.1s;
+}
+.app-btn:active { opacity: 0.6; }
+.app-btn .app-icon { font-size: 20px; line-height: 1; }
+.app-btn .app-label { font-size: 9px; color: rgba(255,255,255,0.7); font-weight: 500; }
+
 /* Bottom controls */
 .bottom-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -323,6 +367,22 @@ body {
     <div class="nav-btn" data-btn="INFO">Info</div>
   </div>
 
+  <!-- App shortcuts -->
+  <div class="app-row">
+    <div class="app-btn" data-app="youtube" style="background:rgba(230,30,30,0.9)">
+      <span class="app-icon">&#9654;</span><span class="app-label">YT</span>
+    </div>
+    <div class="app-btn" data-app="plex" style="background:rgba(230,166,12,0.9)">
+      <span class="app-icon">&#9654;</span><span class="app-label">Plex</span>
+    </div>
+    <div class="app-btn" data-app="appletv" style="background:rgba(30,30,36,0.9)">
+      <span class="app-icon">&#63743;</span><span class="app-label">TV+</span>
+    </div>
+    <div class="app-btn" data-app="paramount" style="background:rgba(0,87,212,0.9)">
+      <span class="app-icon">&#9968;</span><span class="app-label">P+</span>
+    </div>
+  </div>
+
   <!-- Bottom: Volume, Power, Channels -->
   <div class="bottom-row">
     <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
@@ -399,6 +459,26 @@ async function pollStatus() {
 setInterval(pollStatus, 3000);
 pollStatus();
 
+// Bind app shortcut buttons
+document.querySelectorAll('[data-app]').forEach(el => {
+  function fire(e) {
+    e.preventDefault();
+    const app = el.getAttribute('data-app');
+    el.style.opacity = '0.5';
+    setTimeout(() => el.style.opacity = '1', 150);
+    if (navigator.vibrate) navigator.vibrate(10);
+    fetch('/api/launch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({app: app})
+    }).then(r => r.json()).then(d => {
+      showToast(d.ok ? app : 'ERR: ' + d.error);
+    }).catch(() => showToast('Network error'));
+  }
+  el.addEventListener('touchstart', fire, {passive: false});
+  el.addEventListener('mousedown', fire);
+});
+
 // Bind all buttons
 document.querySelectorAll('[data-btn]').forEach(el => {
   function fire(e) {
@@ -457,6 +537,15 @@ class RemoteHandler(BaseHTTPRequestHandler):
                 return
 
             ok, msg = send_button(button)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": ok, "error": msg if not ok else None}).encode())
+        elif self.path == "/api/launch":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            app_key = body.get("app", "")
+            ok, msg = send_launch(app_key)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()

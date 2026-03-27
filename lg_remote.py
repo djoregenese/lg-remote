@@ -135,25 +135,33 @@ class WebSocketClient:
         )
         self.sock.send(frame)
 
+    def _recv_exact(self, n):
+        """Read exactly n bytes from the socket."""
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                break
+            buf.extend(chunk)
+        return bytes(buf)
+
     def recv(self):
-        data = self.sock.recv(8192)
-        if len(data) < 2:
+        header = self._recv_exact(2)
+        if len(header) < 2:
             return ""
-        opcode = data[0] & 0x0F
+        opcode = header[0] & 0x0F
         if opcode == 0x8:
             return ""
         if opcode == 0x9:  # ping -> pong
             self.sock.send(bytearray([0x8A, 0x80]) + os.urandom(4))
             return self.recv()
-        payload_len = data[1] & 0x7F
-        offset = 2
+        payload_len = header[1] & 0x7F
         if payload_len == 126:
-            payload_len = int.from_bytes(data[2:4], "big")
-            offset = 4
+            payload_len = int.from_bytes(self._recv_exact(2), "big")
         elif payload_len == 127:
-            payload_len = int.from_bytes(data[2:10], "big")
-            offset = 10
-        return data[offset : offset + payload_len].decode("utf-8", errors="replace")
+            payload_len = int.from_bytes(self._recv_exact(8), "big")
+        payload = self._recv_exact(payload_len)
+        return payload.decode("utf-8", errors="replace")
 
     def send_ping(self):
         """Send a WebSocket ping frame. Raises on dead connection."""
@@ -274,6 +282,7 @@ PERMISSIONS = [
     "READ_RUNNING_APPS", "READ_TV_CHANNEL_LIST",
     "WRITE_NOTIFICATION", "READ_POWER_STATE", "READ_COUNTRY_INFO",
     "READ_SETTINGS", "CONTROL_TV_SCREEN", "CONTROL_TV_STANDY",
+    "READ_INSTALLED_APPS",
 ]
 
 
@@ -324,6 +333,16 @@ def authenticate(ws):
         if err:
             raise ConnectionError(f"TV rejected: {err}")
     raise ConnectionError("Authentication failed — no key received")
+
+
+def launch_app(ws, app_id):
+    """Launch an app by ID."""
+    ws.send(json.dumps({
+        "type": "request",
+        "id": "launch",
+        "uri": "ssap://system.launcher/launch",
+        "payload": {"id": app_id},
+    }))
 
 
 def get_input_socket_url(ws):
