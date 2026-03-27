@@ -856,8 +856,11 @@ class AppDelegate(NSObject):
             os._exit(0)
             return None
 
-        # In trackpad mode, don't process button keys (except ESC/Q above)
+        # In trackpad mode, spacebar = click, ignore other keys
         if self.remote_view.trackpadSelected:
+            if kc == 49:  # Space
+                self.send_pointer_click()
+                return None
             return event
 
         btn = KEYCODE_MAP.get(kc)
