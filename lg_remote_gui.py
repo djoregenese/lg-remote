@@ -72,7 +72,7 @@ KEYCODE_MAP = {
 }
 
 WINDOW_WIDTH = 220
-WINDOW_HEIGHT = 420
+WINDOW_HEIGHT = 540
 
 # -- Color palette --
 COLOR_BODY_BG = (0.10, 0.10, 0.13, 0.95)
@@ -93,6 +93,38 @@ COLOR_DPAD_ACTIVE = (0.30, 0.50, 0.90, 0.85)
 COLOR_OK_BG = (0.25, 0.25, 0.35, 0.95)
 COLOR_VOL_BG = (0.16, 0.16, 0.22, 0.9)
 COLOR_VOL_DIVIDER = (0.30, 0.30, 0.38, 0.5)
+COLOR_TRACKPAD_BG = (0.12, 0.12, 0.17, 0.9)
+COLOR_TRACKPAD_BORDER = (0.28, 0.28, 0.36, 0.6)
+COLOR_TRACKPAD_ACTIVE = (0.20, 0.35, 0.65, 0.4)
+
+# Trackpad zone geometry
+TRACKPAD_X = 20
+TRACKPAD_Y = 385
+TRACKPAD_W = WINDOW_WIDTH - 40
+TRACKPAD_H = 110
+
+
+def apply_sensitivity(raw_dx, raw_dy):
+    """Convert raw trackpad deltas to TV pointer deltas.
+
+    Args:
+        raw_dx: Raw horizontal delta from NSEvent.deltaX() (float, pixels)
+        raw_dy: Raw vertical delta from NSEvent.deltaY() (float, pixels)
+
+    Returns:
+        (int, int): Scaled dx, dy to send to the TV via send_move()
+
+    TODO: Implement your preferred sensitivity curve. Consider:
+      - Linear (multiplier): simple, predictable — good starting point
+      - Exponential/power curve: slow for fine control, fast for big swipes
+      - Dead zone: ignore tiny movements to prevent jitter
+      - The TV screen is ~1920px wide; macOS trackpad deltas are typically 1-20 per event
+    """
+    # Linear scaling — adjust multiplier to taste
+    sensitivity = 1.5
+    dx = int(raw_dx * sensitivity)
+    dy = int(raw_dy * sensitivity)
+    return dx, dy
 
 
 def make_color(r, g, b, a=1.0):
@@ -122,7 +154,26 @@ class RemoteView(NSView):
         self.activeButton = ""
         self.flashTimer = None
         self.dragOrigin = None
+        self.trackpadActive = False  # True while dragging inside trackpad zone
+        self.trackpadHover = False   # True while cursor is inside trackpad zone
+        self.onPointerMove = None    # callback(dx, dy)
+        self.onPointerClick = None   # callback()
+        self.onPointerScroll = None  # callback(dx, dy)
+        # Set up tracking area for mouse moved events in trackpad zone
+        self._setupTrackingArea()
         return self
+
+    def _setupTrackingArea(self):
+        trackpad_rect = NSMakeRect(TRACKPAD_X, TRACKPAD_Y, TRACKPAD_W, TRACKPAD_H)
+        opts = (
+            AppKit.NSTrackingMouseEnteredAndExited
+            | AppKit.NSTrackingMouseMoved
+            | AppKit.NSTrackingActiveInKeyWindow
+        )
+        area = AppKit.NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
+            trackpad_rect, opts, self, None
+        )
+        self.addTrackingArea_(area)
 
     def isFlipped(self):
         return True
@@ -143,6 +194,7 @@ class RemoteView(NSView):
         self.draw_nav_buttons()
         self.draw_volume_rocker()
         self.draw_power_button()
+        self.draw_trackpad_zone()
         self.draw_footer()
         self.draw_flash_indicator()
 
@@ -401,12 +453,38 @@ class RemoteView(NSView):
         tc = make_color(1, 1, 1, 1) if is_active else make_color_t(COLOR_ACCENT_RED)
         self.draw_label("\u23FB", px, py + 14, pw, 22, size=18, bold=True, color=tc)
 
+    # -- Trackpad zone --
+
+    def draw_trackpad_zone(self):
+        rect = NSMakeRect(TRACKPAD_X, TRACKPAD_Y, TRACKPAD_W, TRACKPAD_H)
+        path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(rect, 12, 12)
+
+        if self.trackpadActive:
+            make_color_t(COLOR_TRACKPAD_ACTIVE).set()
+        else:
+            make_color_t(COLOR_TRACKPAD_BG).set()
+        path.fill()
+
+        make_color_t(COLOR_TRACKPAD_BORDER).set()
+        path.setLineWidth_(1.0)
+        path.stroke()
+
+        # Label
+        label_color = make_color_t(COLOR_TEXT_DIM)
+        if self.trackpadActive:
+            label_color = make_color_t(COLOR_ACCENT_BLUE)
+        self.draw_label("Trackpad", TRACKPAD_X, TRACKPAD_Y + 4, TRACKPAD_W, 14,
+                        size=9, color=label_color)
+        # Cursor icon hint
+        self.draw_label("⇢", TRACKPAD_X, TRACKPAD_Y + TRACKPAD_H / 2 - 10,
+                        TRACKPAD_W, 20, size=16, color=make_color_t(COLOR_TEXT_DIM))
+
     # -- Footer --
 
     def draw_footer(self):
-        self.draw_label("Q or Esc to close",
+        self.draw_label("Q/Esc close · Click trackpad to select",
                         0, WINDOW_HEIGHT - 28, WINDOW_WIDTH, 16,
-                        size=9, color=make_color_t(COLOR_TEXT_DIM))
+                        size=8, color=make_color_t(COLOR_TEXT_DIM))
 
     # -- Flash indicator --
 
@@ -452,15 +530,40 @@ class RemoteView(NSView):
         self.statusConnected = connected
         self.setNeedsDisplay_(True)
 
-    # -- Dragging support --
+    # -- Mouse / trackpad support --
+
+    def _point_in_trackpad(self, event):
+        """Check if an event location (in flipped view coords) is in the trackpad zone."""
+        loc = self.convertPoint_fromView_(event.locationInWindow(), None)
+        return (TRACKPAD_X <= loc.x <= TRACKPAD_X + TRACKPAD_W and
+                TRACKPAD_Y <= loc.y <= TRACKPAD_Y + TRACKPAD_H)
 
     def mouseDown_(self, event):
         # Activate the app so local key monitor works
         NSApp.activateIgnoringOtherApps_(True)
         self.window().makeKeyWindow()
-        self.dragOrigin = event.locationInWindow()
+
+        if self._point_in_trackpad(event):
+            # Start trackpad pointer mode
+            self.trackpadActive = True
+            self.trackpadDragged = False
+            self.dragOrigin = None
+            self.setNeedsDisplay_(True)
+        else:
+            # Window drag mode
+            self.trackpadActive = False
+            self.dragOrigin = event.locationInWindow()
 
     def mouseDragged_(self, event):
+        if self.trackpadActive:
+            # Send pointer move with raw deltas — apply sensitivity curve
+            dx, dy = apply_sensitivity(event.deltaX(), event.deltaY())
+            if self.onPointerMove and (dx or dy):
+                self.onPointerMove(dx, dy)
+                self.trackpadDragged = True
+            return
+
+        # Window drag
         if self.dragOrigin is None:
             return
         window = self.window()
@@ -470,6 +573,32 @@ class RemoteView(NSView):
         dy = screen_loc.y - self.dragOrigin.y
         new_origin = (current_frame.origin.x + dx, current_frame.origin.y + dy)
         window.setFrameOrigin_(new_origin)
+
+    def mouseUp_(self, event):
+        if self.trackpadActive:
+            # Only click if we didn't drag (tap = click, drag = move)
+            if not self.trackpadDragged and self.onPointerClick:
+                self.onPointerClick()
+            self.trackpadActive = False
+            self.trackpadDragged = False
+            self.setNeedsDisplay_(True)
+            return
+        self.dragOrigin = None
+
+    def mouseEntered_(self, event):
+        self.trackpadHover = True
+        self.setNeedsDisplay_(True)
+
+    def mouseExited_(self, event):
+        self.trackpadHover = False
+        self.setNeedsDisplay_(True)
+
+    def scrollWheel_(self, event):
+        if self._point_in_trackpad(event) and self.onPointerScroll:
+            dx = int(event.scrollingDeltaX())
+            dy = int(event.scrollingDeltaY())
+            if dx or dy:
+                self.onPointerScroll(dx, dy)
 
 
 class AppDelegate(NSObject):
@@ -613,6 +742,35 @@ class AppDelegate(NSObject):
 
     def onConnected_(self, _):
         self.remote_view.update_status("Connected", True)
+        # Wire up trackpad pointer callbacks
+        self.remote_view.onPointerMove = self.send_pointer_move
+        self.remote_view.onPointerClick = self.send_pointer_click
+        self.remote_view.onPointerScroll = self.send_pointer_scroll
+
+    def send_pointer_move(self, dx, dy):
+        if self.input_ws:
+            try:
+                self.input_ws.send_move(dx, dy)
+            except Exception:
+                self.remote_view.update_status("Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
+
+    def send_pointer_click(self):
+        if self.input_ws:
+            try:
+                self.input_ws.send_click()
+                self.remote_view.flash_button("CLICK")
+            except Exception:
+                self.remote_view.update_status("Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
+
+    def send_pointer_scroll(self, dx, dy):
+        if self.input_ws:
+            try:
+                self.input_ws.send_scroll(dx, dy)
+            except Exception:
+                self.remote_view.update_status("Connection lost", False)
+                threading.Thread(target=self.reconnect_tv, daemon=True).start()
 
     def onConnectionError_(self, err):
         msg = str(err) if err else "Unknown error"
